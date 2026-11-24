@@ -13,13 +13,13 @@
 
 - 将 `main` 设为仓库默认分支。
 - `artex-dev` 的开发通过审查和 CI 后以 Pull Request 合入 `main`。
-- 要求以下状态检查通过：`Go tests`、`Web checks`、`Browser regression`、`Go vulnerability scan`。
+- 要求以下状态检查通过：`Go tests`、`Web checks`、`Browser regression`、`Go vulnerability scan`。这些名称与 `.github/workflows/ci.yml` 当前 `jobs.*.name` 一致（2026-11-24 核对）。
 - 要求解决所有 Pull Request 对话线程；禁止强制推送和删除分支。
 - 有其他维护者参与时要求至少一人批准；单人维护阶段不要设置会阻止本人合并的审查门槛。
 
 ## `artex-dev`：日常开发分支
 
-- CI 应在 push 和目标为 `main` 的 Pull Request 时运行。
+- 按 `.github/workflows/ci.yml`，CI 在 push 到 `main`、`artex-dev`，以及目标为这两个分支的 Pull Request 时运行；也支持手动触发 `workflow_dispatch`。
 - 开发完成后通过 Pull Request 合入 `main`；不要绕过审查直接更新正式分支。
 
 ## `artex-native-backup`：原生源码备份
