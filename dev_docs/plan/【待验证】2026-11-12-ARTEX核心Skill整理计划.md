@@ -51,4 +51,4 @@
 - Skill 目录与 DB 默认授权均为 10 项；定向测试 `TestBuiltinSkillVisibilityDefaults`、`TestBundledCoreSkillsLoad` 通过。
 - frontmatter YAML、目录/授权集合一致性、MCP 名称、Go 格式、API 侦察脚本语法和 `git diff --check` 检查通过；已移除 Skill 的代码与许可清单引用已清理。
 - 手工核对路由与 MCP 解锁规则：Web/API 工作流声明 ZAP；API 盘点无 ZAP；OWASP 评估仅调用适用的专用流程；AD 工作流不要求 BloodHound，只有用户配置且目标数据匹配时才使用其只读查询；代码审查不解锁 ScopeSentry 或浏览器；ScopeSentry 未配置时明确降级；Browser MCP 与 CLI 分工清楚。
-- 未在当前运行容器中验证新 Skill 提示词，也未对真实目标发起扫描；需要重建镜像后才能进行 ARTEX Agent 运行时验收。
+- 2026-11-24 只读容器清单确认 `artex-local-artex-1` 正运行 `artex-pro-dev:0.3.18`；根据用户当前的渗透测试安排，未向该实例提交 Agent 请求或重启容器。镜像运行不构成 Skill 行为验收；仍待测试窗口结束后验证，且不对真实目标发起验收扫描。
