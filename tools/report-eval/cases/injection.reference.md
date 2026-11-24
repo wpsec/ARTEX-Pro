@@ -45,3 +45,159 @@ Content-Length: 0
 ## 修复建议
 
 将 `name` 参数改为参数化查询，确保输入只按普通值处理，不改变 SQL 语句结构。源码和数据库版本未核实。
+
+<!-- artex:bound-traffic-evidence -->
+
+### 固定样本原始材料
+
+以下材料来自离线合成夹具，独立于报告正文保存。
+
+**正常搜索**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+GET /api/products?name=alpha HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-a
+Content-Length: 0
+
+
+```
+
+响应包：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 55
+
+{"items":[{"id":"product-a","name":"alpha"}],"total":1}
+```
+
+**真条件搜索**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+GET /api/products?name=alpha%27%20AND%201%3D1--%20 HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-a
+Content-Length: 0
+
+
+```
+
+响应包：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 55
+
+{"items":[{"id":"product-a","name":"alpha"}],"total":1}
+```
+
+**假条件搜索**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+GET /api/products?name=alpha%27%20AND%201%3D2--%20 HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-a
+Content-Length: 0
+
+
+```
+
+响应包：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 22
+
+{"items":[],"total":0}
+```
+
+**再次发送真条件搜索**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+GET /api/products?name=alpha%27%20AND%201%3D1--%20 HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-a
+Content-Length: 0
+
+
+```
+
+响应包：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 55
+
+{"items":[{"id":"product-a","name":"alpha"}],"total":1}
+```
+
+**再次发送假条件搜索**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+GET /api/products?name=alpha%27%20AND%201%3D2--%20 HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-a
+Content-Length: 0
+
+
+```
+
+响应包：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 22
+
+{"items":[],"total":0}
+```
+
+**UNION 方式搜索**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+GET /api/products?name=alpha%27%20UNION%20SELECT%20NULL--%20 HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-a
+Content-Length: 0
+
+
+```
+
+响应包：
+
+```http
+HTTP/1.1 400 Bad Request
+Content-Type: application/json
+Content-Length: 26
+
+{"error":"query_rejected"}
+```

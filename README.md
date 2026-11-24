@@ -454,9 +454,9 @@ flowchart TB
 
 ### 开源协议
 
-ARTEX-Pro 是 ARTEX 的修改版本。根目录 [LICENSE](LICENSE) 收录 GNU Affero General Public License v3.0（AGPL-3.0）完整条款；项目来源、修改日期和许可说明见 [NOTICE.md](NOTICE.md)。仓库还保留了 [web/LICENSE](web/LICENSE) 中的 MIT 许可文本及版权声明，本说明不改写其适用范围。
+ARTEX-Pro 是 ARTEX 的修改版本。根目录 [LICENSE](LICENSE) 收录 GNU Affero General Public License v3.0（AGPL-3.0）完整条款；项目来源、修改日期和许可说明见 [NOTICE.md](NOTICE.md)。仓库保留了 [web/LICENSE](web/LICENSE) 中的 MIT 许可文本及版权声明。
 
-复制、修改、分发或通过网络提供服务时，应遵守对应材料适用的许可证完整条款。根目录 AGPL-3.0 与 `web/LICENSE` 中的 MIT 许可文本并存；具体文件适用范围应结合相应的版权与许可声明确认。
+`web/LICENSE` 没有列出具体覆盖文件。本仓库不据此宣称整个 `web/` 目录或全仓库均受该 MIT 文本许可；使用、修改或分发时，应按相关材料实际附带的版权与许可声明核对适用条款。
 
 > **重要提示**：开源协议本身不限制软件的使用用途。以下的「使用限制」与「免责声明」是作者对使用者的额外约定与郑重声明，请务必遵守。
 

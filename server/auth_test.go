@@ -2,7 +2,10 @@ package server
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -80,5 +83,77 @@ func TestValidatePassword(t *testing.T) {
 				t.Fatalf("validatePassword(%q)=%q, wantErr=%v", tc.pw, got, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestExtractTokenRejectsAmbientCredentialsOnUnsafeMethods(t *testing.T) {
+	tests := []struct {
+		name          string
+		method        string
+		path          string
+		cookie        string
+		authorization string
+		want          string
+	}{
+		{name: "GET cookie", method: http.MethodGet, path: "/api/tasks", cookie: "cookie-token", want: "cookie-token"},
+		{name: "HEAD cookie", method: http.MethodHead, path: "/api/tasks", cookie: "cookie-token", want: "cookie-token"},
+		{name: "POST cookie", method: http.MethodPost, path: "/api/tasks", cookie: "cookie-token"},
+		{name: "GET query outside SSE", method: http.MethodGet, path: "/api/tasks?token=query-token"},
+		{name: "GET SSE query", method: http.MethodGet, path: "/api/logs/stream?token=query-token", want: "query-token"},
+		{name: "POST SSE query", method: http.MethodPost, path: "/api/logs/stream?token=query-token"},
+		{name: "POST bearer", method: http.MethodPost, path: "/api/tasks", authorization: "Bearer header-token", want: "header-token"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(tc.method, tc.path, nil)
+			if tc.cookie != "" {
+				r.AddCookie(&http.Cookie{Name: "artex_token", Value: tc.cookie})
+			}
+			if tc.authorization != "" {
+				r.Header.Set("Authorization", tc.authorization)
+			}
+			if got := extractToken(r); got != tc.want {
+				t.Fatalf("extractToken()=%q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRotateJWTKeyInvalidatesPreviouslySignedTokens(t *testing.T) {
+	path := filepath.Join(t.TempDir(), jwtKeyFilename)
+	oldKey := []byte(strings.Repeat("old-key-", 4))
+	if err := os.WriteFile(path, oldKey, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldToken, err := signJWT(oldKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{jwtKeyPath: path, jwtKey: oldKey}
+	if err := s.rotateJWTKey(); err != nil {
+		t.Fatal(err)
+	}
+	newKey := s.jwtKeySnapshot()
+	if string(newKey) == string(oldKey) {
+		t.Fatal("JWT key did not change")
+	}
+	if verifyJWT(oldToken, newKey) {
+		t.Fatal("token signed by the previous key remained valid")
+	}
+
+	persisted, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(persisted) != string(newKey) {
+		t.Fatal("rotated JWT key was not persisted")
+	}
+	newToken, err := signJWT(newKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verifyJWT(newToken, persisted) {
+		t.Fatal("token signed by the rotated key is invalid")
 	}
 }

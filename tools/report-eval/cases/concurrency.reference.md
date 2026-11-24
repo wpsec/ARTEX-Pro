@@ -51,3 +51,163 @@ Content-Length: 25
 ## 修复建议
 
 在数据库中为业务编号建立唯一约束。重复提交返回冲突，不再生成新记录。源码位置未核实。
+
+<!-- artex:bound-traffic-evidence -->
+
+### 固定样本原始材料
+
+以下材料来自离线合成夹具，独立于报告正文保存。
+
+**提交前查询**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+GET /api/registrations?reference=EVAL-RACE HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-a
+Content-Length: 0
+
+
+```
+
+响应包：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 22
+
+{"total":0,"items":[]}
+```
+
+**第一次并发提交**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+POST /api/registrations HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-a
+Content-Type: application/json
+Content-Length: 25
+
+{"reference":"EVAL-RACE"}
+```
+
+响应包：
+
+```http
+HTTP/1.1 201 Created
+Content-Type: application/json
+Content-Length: 38
+
+{"id":"reg-1","reference":"EVAL-RACE"}
+```
+
+**第二次并发提交**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+POST /api/registrations HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-a
+Content-Type: application/json
+Content-Length: 25
+
+{"reference":"EVAL-RACE"}
+```
+
+响应包：
+
+```http
+HTTP/1.1 201 Created
+Content-Type: application/json
+Content-Length: 38
+
+{"id":"reg-2","reference":"EVAL-RACE"}
+```
+
+**第三次并发提交**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+POST /api/registrations HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-a
+Content-Type: application/json
+Content-Length: 25
+
+{"reference":"EVAL-RACE"}
+```
+
+响应包：
+
+```http
+HTTP/1.1 201 Created
+Content-Type: application/json
+Content-Length: 38
+
+{"id":"reg-3","reference":"EVAL-RACE"}
+```
+
+**提交后查询**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+GET /api/registrations?reference=EVAL-RACE HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-a
+Content-Length: 0
+
+
+```
+
+响应包：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 138
+
+{"total":3,"items":[{"id":"reg-1","reference":"EVAL-RACE"},{"id":"reg-2","reference":"EVAL-RACE"},{"id":"reg-3","reference":"EVAL-RACE"}]}
+```
+
+**缺少业务编号的提交**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+POST /api/registrations HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-a
+Content-Type: application/json
+Content-Length: 2
+
+{}
+```
+
+响应包：
+
+```http
+HTTP/1.1 400 Bad Request
+Content-Type: application/json
+Content-Length: 30
+
+{"error":"reference_required"}
+```

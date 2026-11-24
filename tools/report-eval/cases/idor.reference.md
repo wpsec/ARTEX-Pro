@@ -43,3 +43,110 @@ Content-Length: 26
 ## 修复建议
 
 服务端修改作业前校验当前账号是否为创建者或已获授权的协作者。无权访问时拒绝请求，并保持作业设置和状态不变。
+
+<!-- artex:bound-traffic-evidence -->
+
+### 固定样本原始材料
+
+以下材料来自离线合成夹具，独立于报告正文保存。
+
+**修改前查询**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+GET /api/jobs/job-a HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-a
+Content-Length: 0
+
+
+```
+
+响应包：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 92
+
+{"id":"job-a","owner":"user-a","selectedTypes":[],"state":"WAITING","formalAvailable":false}
+```
+
+**其他用户提交修改**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+POST /api/jobs/job-a/types HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-b
+Content-Type: application/json
+Content-Length: 26
+
+{"selectedTypes":["name"]}
+```
+
+响应包：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 11
+
+{"ok":true}
+```
+
+**修改后查询**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+GET /api/jobs/job-a HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-a
+Content-Length: 0
+
+
+```
+
+响应包：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 97
+
+{"id":"job-a","owner":"user-a","selectedTypes":["name"],"state":"SUCCESS","formalAvailable":true}
+```
+
+**不带身份提交修改**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+POST /api/jobs/job-a/types HTTP/1.1
+Host: report-eval.invalid
+Content-Type: application/json
+Content-Length: 26
+
+{"selectedTypes":["name"]}
+```
+
+响应包：
+
+```http
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+Content-Length: 35
+
+{"error":"authentication_required"}
+```

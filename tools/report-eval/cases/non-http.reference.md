@@ -36,3 +36,77 @@ Burp 不适用：本次证据为本地命令或终端输出。
 ## 修复建议
 
 将备份文件和目录权限收紧到实际需要的服务账号或用户组，并检查新生成的备份是否沿用该权限。服务代码和部署配置未检查。
+
+<!-- artex:bound-traffic-evidence -->
+
+### 固定样本原始材料
+
+以下材料来自离线合成夹具，独立于报告正文保存。
+
+**当前用户**
+
+来源：离线合成终端记录
+
+命令：
+
+```sh
+id
+```
+
+标准输出：
+
+```text
+uid=1002(eval-user) gid=1002(eval-user) groups=1002(eval-user)
+
+```
+
+**备份文件权限**
+
+来源：离线合成终端记录
+
+命令：
+
+```sh
+stat -c '%a %U %G %n' /tmp/report-eval/backups/customer-notes.txt
+```
+
+标准输出：
+
+```text
+644 eval-admin eval-admin /tmp/report-eval/backups/customer-notes.txt
+
+```
+
+**读取备份**
+
+来源：离线合成终端记录
+
+命令：
+
+```sh
+cat /tmp/report-eval/backups/customer-notes.txt
+```
+
+标准输出：
+
+```text
+EVAL_ONLY customer-a: synthetic test note
+
+```
+
+**读取相邻受限文件**
+
+来源：离线合成终端记录
+
+命令：
+
+```sh
+cat /tmp/report-eval/backups/private-notes.txt
+```
+
+标准错误：
+
+```text
+cat: /tmp/report-eval/backups/private-notes.txt: Permission denied
+
+```
