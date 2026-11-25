@@ -1,5 +1,4 @@
-const TOKEN_KEY = "artex_token";
-const COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 天（秒）
+import { AUTH_TOKEN_KEY, clearAuthCookie, syncAuthCookie } from "./auth-cookie";
 
 export interface CurrentUser {
   id: string;
@@ -14,18 +13,19 @@ export const auth = {
   getToken(): string | null {
     if (typeof window === "undefined") return null;
     // Mock demo：无真实登录，返回一个假 token 让路由守卫放行、直接进主界面。
-    return localStorage.getItem(TOKEN_KEY) ?? (process.env.NEXT_PUBLIC_MOCK === "1" ? "mock-demo" : null);
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    if (token) syncAuthCookie(token, window.location.port);
+    return token ?? (process.env.NEXT_PUBLIC_MOCK === "1" ? "mock-demo" : null);
   },
 
   setToken(token: string): void {
-    localStorage.setItem(TOKEN_KEY, token);
-    // 同步写 cookie，供 Next.js middleware 服务端读取
-    document.cookie = `${TOKEN_KEY}=${encodeURIComponent(token)}; path=/; max-age=${COOKIE_MAX_AGE}; SameSite=Lax`;
+    localStorage.setItem(AUTH_TOKEN_KEY, token);
+    syncAuthCookie(token, window.location.port);
   },
 
   clearToken(): void {
-    localStorage.removeItem(TOKEN_KEY);
-    document.cookie = `${TOKEN_KEY}=; path=/; max-age=0`;
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    clearAuthCookie(window.location.port);
   },
 
   // 从 JWT payload 的 sub 字段解析当前用户，仅用于展示，不做签名验证。

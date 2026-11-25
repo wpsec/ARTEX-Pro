@@ -91,6 +91,8 @@ func TestExtractTokenRejectsAmbientCredentialsOnUnsafeMethods(t *testing.T) {
 		name          string
 		method        string
 		path          string
+		host          string
+		cookieName    string
 		cookie        string
 		authorization string
 		want          string
@@ -100,20 +102,53 @@ func TestExtractTokenRejectsAmbientCredentialsOnUnsafeMethods(t *testing.T) {
 		{name: "POST cookie", method: http.MethodPost, path: "/api/tasks", cookie: "cookie-token"},
 		{name: "GET query outside SSE", method: http.MethodGet, path: "/api/tasks?token=query-token"},
 		{name: "GET SSE query", method: http.MethodGet, path: "/api/logs/stream?token=query-token", want: "query-token"},
+		{name: "SSE query overrides cookie from another instance", method: http.MethodGet, path: "/api/logs/stream?token=current-token", host: "127.0.0.1:8787", cookieName: "artex_token_p8787", cookie: "stale-token", want: "current-token"},
+		{name: "port-scoped cookie", method: http.MethodGet, path: "/api/tasks", host: "127.0.0.1:8787", cookieName: "artex_token_p8787", cookie: "current-token", want: "current-token"},
+		{name: "legacy shared cookie is ignored on non-default port", method: http.MethodGet, path: "/api/tasks", host: "127.0.0.1:8787", cookieName: "artex_token", cookie: "stale-token"},
+		{name: "cookie from another port is ignored", method: http.MethodGet, path: "/api/tasks", host: "127.0.0.1:8787", cookieName: "artex_token_p18787", cookie: "other-instance-token"},
 		{name: "POST SSE query", method: http.MethodPost, path: "/api/logs/stream?token=query-token"},
 		{name: "POST bearer", method: http.MethodPost, path: "/api/tasks", authorization: "Bearer header-token", want: "header-token"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			r := httptest.NewRequest(tc.method, tc.path, nil)
+			if tc.host != "" {
+				r.Host = tc.host
+			}
 			if tc.cookie != "" {
-				r.AddCookie(&http.Cookie{Name: "artex_token", Value: tc.cookie})
+				cookieName := tc.cookieName
+				if cookieName == "" {
+					cookieName = "artex_token"
+				}
+				r.AddCookie(&http.Cookie{Name: cookieName, Value: tc.cookie})
 			}
 			if tc.authorization != "" {
 				r.Header.Set("Authorization", tc.authorization)
 			}
 			if got := extractToken(r); got != tc.want {
 				t.Fatalf("extractToken()=%q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAuthCookieNameUsesNonDefaultPort(t *testing.T) {
+	tests := []struct {
+		host string
+		want string
+	}{
+		{host: "127.0.0.1:8787", want: "artex_token_p8787"},
+		{host: "127.0.0.1:18787", want: "artex_token_p18787"},
+		{host: "[::1]:8787", want: "artex_token_p8787"},
+		{host: "example.com", want: "artex_token"},
+		{host: "example.com:80", want: "artex_token"},
+		{host: "example.com:443", want: "artex_token"},
+		{host: "example.com:invalid", want: "artex_token"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.host, func(t *testing.T) {
+			if got := authCookieName(tc.host); got != tc.want {
+				t.Fatalf("authCookieName(%q)=%q, want %q", tc.host, got, tc.want)
 			}
 		})
 	}

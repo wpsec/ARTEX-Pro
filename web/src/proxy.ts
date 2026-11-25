@@ -1,5 +1,7 @@
-import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+
+import { authCookieName } from "@/lib/auth-cookie";
 
 const AUTH_PAGES = ["/login", "/setup"];
 
@@ -8,7 +10,7 @@ export function proxy(request: NextRequest) {
   if (process.env.NEXT_PUBLIC_MOCK === "1") return NextResponse.next();
 
   const { pathname } = request.nextUrl;
-  const token = request.cookies.get("artex_token")?.value;
+  const token = request.cookies.get(authCookieName(request.nextUrl.port))?.value;
   const isAuthPage = AUTH_PAGES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
   // 未登录 → 跳转登录页
