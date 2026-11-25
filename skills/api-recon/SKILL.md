@@ -17,6 +17,12 @@ mcps:
 
 本 skill **仅做 API / 参数面侦察**，不是漏洞挖掘或渗透利用阶段。
 
+### 本次任务约束与请求预算
+
+用户本次明确给出的目标、HTTP 方法、总请求数、速率、并发、文件写入、数据库写入和停止条件优先于本 Skill 的默认路线图。执行前列出每个步骤将发送的实际请求数；每个 HTTP 请求都计入预算，包括重定向、重试、浏览器自动请求和工具校准请求。禁止的方法不得为补充状态码或响应头而调用。脚本、字典或浏览器流程如果无法限制在剩余额度内，不要启动该批流程；改用可计数的授权方法，或到达上限后报告未覆盖项。
+
+没有用户明确的请求数上限时，按常规流程完成静态、运行时和参数覆盖，不另加人工总量上限。明确禁止文件或数据库写入时，不创建临时响应文件，也不调用资产写入工具；按任务允许的方式保留必要结果，并在交付中注明未持久化的产物。
+
 ### 任务边界
 
 | 范围 | 允许 | 禁止 |
@@ -77,7 +83,7 @@ mcps:
 - [ ] **进壳**：访问业务 path 时非 `/login`（注意 hash 路由）
 - [ ] **参数**：coverage/both 完成参数触发矩阵 + `param_samples.json`；Phase 5 合并 `params_merged.json`
 - [ ] **深度**（若模块页空白）：Phase 4 权限树还原并重跑，直至出现 **module 级 API**（非仅 locale/bootstrap）
-- [ ] **交付**：Phase 5 产出齐全（见 Phase 5 产出表）；`insert_assets` 写入服务与端点资产
+- [ ] **交付**：Phase 5 产出齐全（见 Phase 5 产出表）；范围允许数据库写入时用 `insert_assets` 登记服务与端点资产，任务明确禁止写入时注明未登记
 
 ---
 
@@ -128,7 +134,7 @@ Phase 0 分类 + OUTDIR
   → Phase 2 鉴权三道门 → config.json
   → 门禁 B → Phase 3 运行时 + 参数矩阵
   → Phase 4 权限树（必要时）→ 重跑 Phase 3
-  → Phase 5 合并报告 + insert_assets批量插入所有发现的服务、端点api资产，无论如何插入时不允许漏掉已发现的资产
+  → Phase 5 合并报告 + 范围允许时用 insert_assets 批量登记发现的服务和端点资产
 ```
 
 按序勾选；**前一项未完成不得进入下一 Phase**。
@@ -140,7 +146,7 @@ Phase 0 分类 + OUTDIR
 5. [ ] **门禁 B**：调整 runtime 脚本 → [Phase 3](#phase-3--运行时)
 6. [ ] **Phase 3**：depth / coverage / both；确认进壳；参数触发矩阵 → `param_samples.json`
 7. [ ] **Phase 4**（若需要）：权限树 → patch stubs → 重跑 Phase 3 → [Phase 4](#phase-4--权限树还原)
-8. [ ] **Phase 5**：合并产出 + 报告 + `insert_assets` → [Phase 5](#phase-5--合并与报告)
+8. [ ] **Phase 5**：合并产出 + 报告 + 范围允许时 `insert_assets` → [Phase 5](#phase-5--合并与报告)
 
 ---
 
@@ -379,7 +385,7 @@ stub 检查：外层 `response_code` 与拦截器门一致；flat codes 与 tree
 | `params_merged.json` | 5 | 合并参数字段 + 置信度 |
 | `api_merged.txt` | 5 | `METHOD /path [params] [static\|runtime\|both]` |
 | `site_map.json` | 5 | 路由、API、params、功能点、局限 |
-| **insert_assets** | 5 | 将所有服务、端点资产写入资产库 |
+| **insert_assets** | 5 | 默认将发现的服务、端点资产写入资产库；任务明确禁止数据库写入时不调用，并注明未登记 |
 
 ### 5b — 参数合并
 
