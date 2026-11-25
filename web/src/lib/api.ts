@@ -162,8 +162,10 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
 //
 // Dev (next dev): SSE must NOT go through the Next.js `/api` rewrite — that proxy
 // buffers the streamed response, so event frames never reach the browser (the
-// EventSource opens but receives 0 messages). So in dev only we connect straight
-// to the Go backend on :8787, whose CORS is open.
+// EventSource opens but receives 0 messages). The standard Next dev ports connect
+// straight to the Go backend on :8787. Nonstandard ports use same-origin so a
+// separately mapped ARTEX instance does not accidentally connect to another
+// instance on the same host's :8787; custom Next dev ports can set the override.
 //
 // Override either default with NEXT_PUBLIC_SSE_BASE (set it to "" to force same-origin).
 // Same-origin streams use the auth cookie; cross-origin streams need a query token
@@ -194,7 +196,9 @@ function mockReport(_task?: string): string {
 export function sseUrl(path: string): string {
   const base =
     process.env.NEXT_PUBLIC_SSE_BASE ??
-    (process.env.NODE_ENV !== "production" && typeof window !== "undefined"
+    (process.env.NODE_ENV !== "production" &&
+    typeof window !== "undefined" &&
+    ["3000", "5173"].includes(window.location.port)
       ? `${window.location.protocol}//${window.location.hostname}:8787`
       : "");
   const token = getToken();

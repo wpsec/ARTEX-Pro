@@ -232,6 +232,8 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml stop artex
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d artex
 ```
 
+开发前端使用标准 `3000` 或 `5173` 端口时，SSE 默认直连 Go 后端 `:8787`，绕过 Next.js 对流式响应的缓冲。若 Next dev 使用其他端口，启动前设置 `NEXT_PUBLIC_SSE_BASE` 为后端基址。通过容器映射端口访问 ARTEX 时，SSE 默认走当前实例的同源地址。
+
 - 后端：`go run ./cmd/artex`（不带 `-tags embedui` 则不内嵌前端）
 - 前端：`cd web && npm run dev`（`/api` 反代到后端，带热更新）
 - ZAP 定向测试：
