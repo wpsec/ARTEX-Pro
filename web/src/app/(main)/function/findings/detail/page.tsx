@@ -197,7 +197,12 @@ function FindingDetailInner() {
                   <p className="text-sm leading-relaxed whitespace-pre-wrap">{finding.summary || "（无摘要）"}</p>
                 </CardContent>
               </Card>
-              <FindingRetestPanel key={id} findingId={id} readOnly={finding.inherited} onCompleted={load} />
+              <FindingRetestPanel
+                key={`retests-${id}`}
+                findingId={id}
+                readOnly={finding.inherited}
+                onCompleted={load}
+              />
               <Card>
                 <CardHeader>
                   <CardTitle className="text-sm">证据 / PoC</CardTitle>
@@ -251,7 +256,7 @@ function FindingDetailInner() {
                 </CardContent>
               </Card>
               <FindingTrafficPanel
-                key={id}
+                key={`traffic-${id}`}
                 findingId={id}
                 contextTask={contextTaskId || undefined}
                 readOnly={finding.inherited}

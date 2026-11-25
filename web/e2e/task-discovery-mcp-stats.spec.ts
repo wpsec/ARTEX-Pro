@@ -39,6 +39,7 @@ async function authenticateAndMockAPI(
 test("task findings stay scoped and detail navigation returns to the task tab", async ({ context, page, baseURL }) => {
   const writes: string[] = [];
   const reads: string[] = [];
+  const duplicateKeyWarnings: string[] = [];
   const finding = {
     id: "node-11",
     finding_id: "11",
@@ -93,6 +94,10 @@ test("task findings stay scoped and detail navigation returns to the task tab", 
     reads,
   );
 
+  page.on("console", (message) => {
+    if (message.text().includes("same key")) duplicateKeyWarnings.push(message.text());
+  });
+
   await page.goto("/function/tasks/detail?id=42&tab=findings");
   await expect(page.getByText("当前任务发现", { exact: true })).toBeVisible();
   await expect(page.getByText("其他任务发现", { exact: true })).toHaveCount(0);
@@ -107,6 +112,7 @@ test("task findings stay scoped and detail navigation returns to the task tab", 
   await expect(page).toHaveURL(/\/function\/tasks\/detail\?id=42&tab=findings$/);
   await expect(page.getByText("当前任务发现", { exact: true })).toBeVisible();
   await expect(page.getByText("其他任务发现", { exact: true })).toHaveCount(0);
+  expect(duplicateKeyWarnings).toEqual([]);
   expect(reads).toContain("GET /api/exploration/findings/11?context_task=42");
   expect(writes).toEqual([]);
 });
