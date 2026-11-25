@@ -2,12 +2,12 @@
 
 以下设置需在 GitHub 仓库设置中启用；本地文件无法替代远端分支规则。
 
-2026-11-26 本地工作流复核：CI 的四个必需检查名与 workflow job 名称一致，push/PR 触发分支包含 `main` 和 `artex-dev`；CI 与 Release 共 26 个 Actions 引用均固定到完整 40 位 commit SHA。该检查不代表 GitHub 远端保护规则已配置。
+2026-11-26 工作流与公开 Actions 复核：CI 的四个必需检查名与 workflow job 名称一致，push/PR 触发分支包含 `main` 和 `artex-dev`；CI 与 Release 共 26 个 Actions 引用均固定到完整 40 位 commit SHA。公开 API 确认 `52707a3` 的 CI 全绿，远端最新 `71777276` 的 Browser regression 失败；原始日志接口未经认证返回 403。此检查不代表 GitHub 远端保护规则已配置。
 
 ## 需要的用户配合
 
-- 确认目标仓库为 `wpsec/ARTEX-local`，并确认是否由你拥有仓库管理员权限。
-- 2026-11-24 已发现可用的 GitHub connector，但当前账号尚未安装或连接。若希望我核查远端 Actions 和仓库信息，请连接该 connector 并授权访问目标仓库；也可提供 Go job 的完整日志以及 `main`、`artex-dev`、`artex-native-backup` 规则设置截图。
+- 本地仓库沿用 `wpsec/ARTEX-local` 旧地址；GitHub 当前将其重定向到规范仓库 `wpsec/ARTEX-Pro`。远端规则核查和应用应定位到 `wpsec/ARTEX-Pro`。
+- 2026-11-26 插件目录中的 GitHub connector 显示未安装，本机也没有 `gh` CLI。公开 API 可读 Actions 摘要，但完整失败日志与仓库规则设置仍不可见；核对规则需要已连接的 GitHub connector 或管理员提供设置截图。
 - 如需实际应用设置，管理员权限必须覆盖分支规则、Actions 权限与 Dependabot。不要在聊天中粘贴 Personal Access Token；使用 GitHub 连接授权即可。
 - 我会先核对当前规则和必需状态检查名称，再给出可审核的配置清单；只有你明确要求应用远端更改后才执行。
 
