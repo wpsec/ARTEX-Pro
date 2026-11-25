@@ -2,6 +2,8 @@
 
 以下设置需在 GitHub 仓库设置中启用；本地文件无法替代远端分支规则。
 
+2026-11-26 本地工作流复核：CI 的四个必需检查名与 workflow job 名称一致，push/PR 触发分支包含 `main` 和 `artex-dev`；CI 与 Release 共 26 个 Actions 引用均固定到完整 40 位 commit SHA。该检查不代表 GitHub 远端保护规则已配置。
+
 ## 需要的用户配合
 
 - 确认目标仓库为 `wpsec/ARTEX-local`，并确认是否由你拥有仓库管理员权限。
