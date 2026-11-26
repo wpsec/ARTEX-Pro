@@ -349,6 +349,9 @@ func TestFindingDeliveryReportIsolationAndEvidenceVersion(t *testing.T) {
 		t.Fatalf("save inherited report: status=%d", code)
 	}
 	ownerSaved := get(ownerID)
+	if ownerSaved.HasDetailedReport {
+		t.Fatal("saving a delivery report alone must not mark the detailed report saved")
+	}
 	if owner := ownerSaved; stripDeliveryTrafficEvidence(owner.Content) != ownerContent || !owner.Exists {
 		t.Fatalf("owner report was not persisted independently: %+v", owner)
 	}
@@ -503,5 +506,6 @@ type FindingDeliveryReport struct {
 	Content                string `json:"content"`
 	EvidenceVersion        int64  `json:"evidence_version"`
 	CurrentEvidenceVersion int64  `json:"current_evidence_version"`
+	HasDetailedReport      bool   `json:"has_detailed_report"`
 	Exists                 bool   `json:"exists"`
 }

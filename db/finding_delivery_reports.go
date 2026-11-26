@@ -14,6 +14,7 @@ type FindingDeliveryReport struct {
 	CVSSVector             string     `json:"cvss_vector"`
 	EvidenceVersion        int64      `json:"evidence_version"`
 	CurrentEvidenceVersion int64      `json:"current_evidence_version"`
+	HasDetailedReport      bool       `json:"has_detailed_report"`
 	Exists                 bool       `json:"exists"`
 	UpdatedAt              *time.Time `json:"updated_at,omitempty"`
 }
@@ -67,13 +68,13 @@ ORDER BY f.created_at, f.id`, before)
 func (d *DB) GetFindingDeliveryReport(taskID, findingID int64) (*FindingDeliveryReport, error) {
 	out := &FindingDeliveryReport{TaskID: taskID, FindingID: findingID}
 	var updatedAt sql.NullTime
-	err := d.QueryRow(`SELECT f.evidence_version,
+	err := d.QueryRow(`SELECT f.evidence_version, NULLIF(btrim(COALESCE(f.report,'')), '') IS NOT NULL,
        COALESCE(r.content,''), COALESCE(r.cvss_vector,''),
        COALESCE(r.evidence_version,0), r.updated_at
 FROM findings f
 LEFT JOIN finding_delivery_reports r ON r.finding_id=f.id AND r.task_id=$1
 WHERE f.id=$2`, taskID, findingID).Scan(
-		&out.CurrentEvidenceVersion, &out.Content, &out.CVSSVector, &out.EvidenceVersion, &updatedAt)
+		&out.CurrentEvidenceVersion, &out.HasDetailedReport, &out.Content, &out.CVSSVector, &out.EvidenceVersion, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
