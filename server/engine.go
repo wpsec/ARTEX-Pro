@@ -371,16 +371,33 @@ func (e *Engine) execContextFor(parent context.Context, taskID string) context.C
 	if c := e.execCtx[taskID]; c != nil && c.Err() == nil {
 		return c
 	}
-	c, cancel := context.WithCancelCause(parent)
+	bounded, done := parent, func() {}
+	if e.m != nil {
+		if task, ok := e.m.Task(taskID); ok {
+			bounded, done = task.windowSnapshot().context(parent)
+		}
+	}
+	c, cancel := context.WithCancelCause(bounded)
 	e.execCtx[taskID] = c
-	e.execCancel[taskID] = cancel
+	e.execCancel[taskID] = func(cause error) {
+		cancel(cause)
+		done()
+	}
 	return c
 }
 
-// IsPaused reports whether a task is user-paused.
+// IsPaused reports whether task execution is currently held.
 func (e *Engine) IsPaused(taskID string) bool {
 	v, ok := e.paused.Load(taskID)
-	return ok && v.(bool)
+	if ok && v.(bool) {
+		return true
+	}
+	if e.m != nil {
+		if task, exists := e.m.Task(taskID); exists {
+			return !task.windowSnapshot().allowed(time.Now())
+		}
+	}
+	return false
 }
 
 // Started reports whether the engine loops are running for a task.
@@ -1260,7 +1277,7 @@ func taskExecutionPaused(cause error) bool {
 	}
 	switch abort.Code {
 	case "paused_by_user", "paused_by_orchestrator", "paused_on_reload", "paused_race_guard",
-		"queued_for_admission", "llm_unavailable_queued", "task_deleted":
+		"queued_for_admission", "llm_unavailable_queued", "task_deleted", "run_window_closed":
 		return true
 	default:
 		return false

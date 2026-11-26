@@ -281,6 +281,9 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		log.Printf("[engine] no LLM provider configured — engine idle until set via /api/llm or env")
 	}
 	s.restoreTaskRuntimes()
+	if m.pg != nil {
+		s.goBackground(func() { s.runWindowGuard(s.ctx) })
+	}
 	s.goBackground(s.reconcileConcurrency)
 	s.startTaskArchiveWorker()
 	s.wireInterceptReviewer() // LLM 兜底审批:未命中拦截规则的命令交给模型判定
@@ -309,13 +312,14 @@ func (s *Server) restoreTaskRuntimes() {
 			s.engine.startDeadlineCoordinator(s.ctx, t)
 		}
 	}
+	s.pauseOutsideRunWindows()
 	// Restore every task that had already been admitted before shutdown. Starting
 	// only the active UI task left other non-queued tasks counted as concurrency
 	// occupants without live loops, which could permanently block the persistent
 	// FIFO. Paused loops remain idle; queued tasks are admitted below as slots allow.
 	for _, t := range m.List() {
 		lifecycle := t.lifecycleSnapshot()
-		if !lifecycle.Queued && !isTerminalStatus(lifecycle.Status) {
+		if !lifecycle.Queued && !isTerminalStatus(lifecycle.Status) && t.windowSnapshot().allowed(time.Now()) {
 			s.engine.Run(s.ctx, t)
 		}
 	}
@@ -1078,6 +1082,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 	dtos := make([]TaskDTO, 0, len(list))
 	for _, t := range list {
 		dto := taskDTO(t, s.resolvedTaskStatus(t))
+		s.fillWindowDrainState(&dto, t)
 		applyTaskArchiveBlocker(&dto, archiveBlockers)
 		metric := metrics[t.ExpID]
 		dto.Tokens = tokenTotalDTO(metric.Tokens)
@@ -1225,6 +1230,14 @@ func restoreRerunIntent(t *Task, before *db.Node) error {
 	return t.Store.SetIntentState(before.ID, before.State)
 }
 
+func writeRerunAdmissionError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errRunWindowClosed) {
+		writeErr(w, http.StatusConflict, errRunWindowClosed.Error())
+		return
+	}
+	writeErr(w, http.StatusInternalServerError, err.Error())
+}
+
 func (s *Server) rerunIntent(w http.ResponseWriter, r *http.Request) {
 	t, ok := s.m.Task(r.PathValue("id"))
 	if !ok {
@@ -1241,6 +1254,10 @@ func (s *Server) rerunIntent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.engine.decInflight(t.ID)
+	if t.windowSnapshot().blocksAdmission(t.lifecycleSnapshot(), time.Now()) {
+		writeRerunAdmissionError(w, errRunWindowClosed)
+		return
+	}
 	before, err := t.Store.GetNode(iid)
 	if err != nil {
 		writeErr(w, 500, err.Error())
@@ -1258,9 +1275,10 @@ func (s *Server) rerunIntent(w http.ResponseWriter, r *http.Request) {
 	queued, err := s.admitTask(t, "resume")
 	if err != nil {
 		if rollbackErr := restoreRerunIntent(t, before); rollbackErr != nil {
-			err = fmt.Errorf("%w; restore intent %d after admission failure: %v", err, iid, rollbackErr)
+			writeErr(w, http.StatusInternalServerError, fmt.Sprintf("%v; restore intent %d after admission failure: %v", err, iid, rollbackErr))
+			return
 		}
-		writeErr(w, 500, err.Error())
+		writeRerunAdmissionError(w, err)
 		return
 	}
 	log.Printf("[task] #%s 意图 #%d 已重开(重跑)", t.ID, iid)
@@ -1280,6 +1298,10 @@ func (s *Server) rerunBlocked(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.engine.decInflight(t.ID)
+	if t.windowSnapshot().blocksAdmission(t.lifecycleSnapshot(), time.Now()) {
+		writeRerunAdmissionError(w, errRunWindowClosed)
+		return
+	}
 	intents, err := t.Store.ListByKind(db.KindIntent, 1000000)
 	if err != nil {
 		writeErr(w, 500, err.Error())
@@ -1308,9 +1330,10 @@ func (s *Server) rerunBlocked(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if len(rollbackErrors) > 0 {
-				err = fmt.Errorf("%w; restore blocked intents after admission failure: %s", err, strings.Join(rollbackErrors, "; "))
+				writeErr(w, http.StatusInternalServerError, fmt.Sprintf("%v; restore blocked intents after admission failure: %s", err, strings.Join(rollbackErrors, "; ")))
+				return
 			}
-			writeErr(w, 500, err.Error())
+			writeRerunAdmissionError(w, err)
 			return
 		}
 		log.Printf("[task] #%s 批量重开 %d 条 blocked 意图", t.ID, n)
@@ -1491,12 +1514,18 @@ type createTaskReq struct {
 	CoverageEnabled      *bool    `json:"coverage_enabled,omitempty"`  // 资产覆盖度功能;省略/null=默认开(true)。false=关闭覆盖度计算/展示/自动累积范围+隐藏 add_task_scope/list_untested_assets。company 关联不受影响。
 	// InterceptRules 任务级资产拦截/允许规则(创建时录入,存 task_intercept_rules,不进全局表)。
 	InterceptRules []taskInterceptRuleReq `json:"intercept_rules,omitempty"`
+	RunWindow      *db.TaskRunWindow      `json:"run_window,omitempty"`
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	var req createTaskReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	window, err := db.ValidateTaskRunWindow(req.RunWindow)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if strings.TrimSpace(req.Description) == "" {
@@ -1548,6 +1577,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		TimeoutSeconds: req.TimeoutSeconds, PlanHeartbeatSeconds: req.PlanHeartbeatSeconds,
 		CoverageEnabled: req.CoverageEnabled,
 		InterceptRules:  interceptRules,
+		RunWindow:       window,
 	})
 	if err != nil {
 		if errors.Is(err, db.ErrTaskCategoryInvalid) || errors.Is(err, db.ErrTaskCategoryNotFound) {
@@ -1766,6 +1796,7 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dto := taskDTO(t, s.resolvedTaskStatus(t))
+	s.fillWindowDrainState(&dto, t)
 	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
 	applyTaskArchiveBlocker(&dto, archiveBlockers)
 	writeJSON(w, 200, dto)
@@ -3714,8 +3745,8 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 409, "任务正在删除，无法发送新消息")
 		return
 	}
-	// 注意:任务暂停(paused)不拦截主 Agent 对话。主 Agent 编排会话独立于 planner/
-	// worker 的暂停,暂停中仍可继续对话(暂停只终止其正在进行的那一轮,见 control())。
+	// The main conversation participates in the window restriction because it
+	// can also ask the task's Agents to perform work.
 	var req struct {
 		Message     string           `json:"message"`
 		Attachments []chatAttachment `json:"attachments,omitempty"` // 方式1 上传的文件(路径相对任务工作目录)
@@ -3743,7 +3774,18 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 409, "主 Agent 正在处理上一条消息，请稍候")
 		return
 	}
-	ctx, cancel := context.WithCancelCause(s.ctx)
+	window := t.windowSnapshot()
+	if !window.allowed(time.Now()) {
+		s.chatMu.Unlock()
+		writeErr(w, http.StatusConflict, "任务停止时间已到，请先修改停止时间")
+		return
+	}
+	parent, endWindow := window.context(s.ctx)
+	ctx, cancelCause := context.WithCancelCause(parent)
+	cancel := func(cause error) {
+		cancelCause(cause)
+		endWindow()
+	}
 	ctx = intercept.WithReviewContext(ctx, "", intercept.ReviewBackground{Source: intercept.BackgroundUserMessage, Text: req.Message})
 	s.chatBusy[t.ID] = true
 	s.chatCancel[t.ID] = cancel

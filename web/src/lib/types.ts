@@ -4,6 +4,11 @@
 export type TaskStatus = "created" | "queued" | "running" | "paused" | "done" | "failed" | "timeout";
 export type EngineMode = "exploring" | "paused" | "stalled" | "idle";
 
+export interface TaskRunWindow {
+  end: string;
+  time_zone: string;
+}
+
 export interface Task {
   id: string;
   name?: string; // 可选任务名称;空/缺省=未命名,展示时回退到描述
@@ -21,6 +26,11 @@ export interface Task {
   last_activity_unix?: number; // unix seconds of the last activity (0/undef if none)
   paused?: boolean;
   queued?: boolean;
+  run_window?: TaskRunWindow;
+  run_window_revision?: number;
+  run_window_status?: "approved" | "closed" | "pausing";
+  run_window_next_at?: string;
+  deadline_at?: string;
   active?: boolean;
   in_flight?: number;
   findings?: { critical: number; high: number; medium: number; low: number }; // 已登记漏洞数(按严重度分档)

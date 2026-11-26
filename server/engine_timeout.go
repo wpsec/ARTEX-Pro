@@ -243,7 +243,16 @@ func (e *Engine) settleTask(ctx context.Context, t *Task) {
 // task-timeout planner words (final goal judgment; no new intents). Waits for the
 // LLM to be ready (bounded by ctx) so a completable task isn't mis-judged timeout.
 func (e *Engine) runFinalPlannerRound(ctx context.Context, t *Task) (met bool) {
-	if e.IsDeleting(t.ID) {
+	window := t.windowSnapshot()
+	if e.IsDeleting(t.ID) || !window.allowed(time.Now()) {
+		return false
+	}
+	if window.policy != nil {
+		ctx = e.execContextFor(ctx, t.ID)
+	}
+	ctx, cancel := t.finalPlannerWindowContext(ctx, window.revision)
+	defer cancel()
+	if ctx.Err() != nil {
 		return false
 	}
 	planner, _ := e.snapshotFor(t)
@@ -259,12 +268,15 @@ func (e *Engine) runFinalPlannerRound(ctx context.Context, t *Task) (met bool) {
 		}
 		planner, _ = e.snapshotFor(t)
 	}
-	// 独立 ctx(不挂 execCancel,避免 pause/硬 cancel 打断这最后一轮),带 Final 注入任务超时词。
+	// 配置运行窗口时仍用任务执行上下文，确保窗口变更也能终止最后一轮。
 	fctx := e.clockCtx(ctx, t, true)
 	if !e.beginTaskOperation(t.ID) {
 		return false
 	}
 	defer e.decInflight(t.ID)
+	if fctx.Err() != nil {
+		return false
+	}
 	emit := func(r db.Activity) { e.emitActivity(t, r) }
 	e.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
 		Summary: fmt.Sprintf("任务超时收尾·终局判定(第 %d 轮)", e.nextPlannerRound(t.ID))})
@@ -277,5 +289,5 @@ func (e *Engine) runFinalPlannerRound(ctx context.Context, t *Task) (met bool) {
 	} else if met {
 		log.Printf("[deadline] task %s 终局判定目标达成: %s", t.ID, reason)
 	}
-	return met
+	return met && fctx.Err() == nil
 }

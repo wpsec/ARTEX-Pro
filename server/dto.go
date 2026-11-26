@@ -61,6 +61,11 @@ type TaskDTO struct {
 	ArchiveBlockedBy   string             `json:"archive_blocked_by_task_id,omitempty"`
 	CompanyIDs         []int64            `json:"company_ids"`
 	CoverageEnabled    bool               `json:"coverage_enabled"` // 资产覆盖度功能开关(创建时定)
+	RunWindow          *db.TaskRunWindow  `json:"run_window,omitempty"`
+	RunWindowRevision  int64              `json:"run_window_revision"`
+	RunWindowStatus    string             `json:"run_window_status,omitempty"`
+	RunWindowNextAt    string             `json:"run_window_next_at,omitempty"`
+	DeadlineAt         string             `json:"deadline_at,omitempty"`
 }
 
 // FindingSeverityDTO 是任务列表里按严重度分档的漏洞计数（严重/高/中/低）。
@@ -109,6 +114,16 @@ func taskDTO(t *Task, status string) TaskDTO {
 		sourceIDs = append(sourceIDs, i64s(id))
 	}
 	profileIDs := append(make([]int64, 0, len(llmState.ProfileIDs)), llmState.ProfileIDs...)
+	window := t.windowSnapshot()
+	var windowStatus, nextAt string
+	if window.policy != nil && !isTerminalStatus(lifecycle.Status) {
+		if window.allowed(time.Now()) {
+			windowStatus = "approved"
+			nextAt = rfc3339(window.stopsAt)
+		} else {
+			windowStatus = "closed"
+		}
+	}
 	return TaskDTO{
 		ID:                 t.ID,
 		ExplorationID:      t.ExpID,
@@ -134,6 +149,11 @@ func taskDTO(t *Task, status string) TaskDTO {
 		SourceTaskIDs:      sourceIDs,
 		CompanyIDs:         lifecycle.CompanyIDs,
 		CoverageEnabled:    t.CoverageEnabled,
+		RunWindow:          window.policy,
+		RunWindowRevision:  window.revision,
+		RunWindowStatus:    windowStatus,
+		RunWindowNextAt:    nextAt,
+		DeadlineAt:         completedRFC(lifecycle.DeadlineAt),
 	}
 }
 

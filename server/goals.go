@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/wpsec/ARTEX-local/agent"
 	"github.com/wpsec/ARTEX-local/db"
@@ -128,6 +129,7 @@ func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued
 	}
 	defer s.engine.decInflight(t.ID)
 	lifecycle := t.lifecycleSnapshot()
+	window := t.windowSnapshot()
 	if requirePaused {
 		if isTerminalStatus(lifecycle.Status) {
 			return false, fmt.Errorf("终态任务不能执行继续")
@@ -135,7 +137,12 @@ func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued
 		if !lifecycle.Paused {
 			return false, fmt.Errorf("仅已暂停的任务可以继续")
 		}
+		if !window.allowed(time.Now()) {
+			return false, errRunWindowClosed
+		}
 		mode = s.resumeAdmissionMode(t)
+	} else if window.blocksAdmission(lifecycle, time.Now()) {
+		return false, errRunWindowClosed
 	}
 	wasTerminal := isTerminalStatus(lifecycle.Status)
 	wasPaused := lifecycle.Paused || s.engine.IsPaused(t.ID)
@@ -217,7 +224,8 @@ func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued
 func (s *Server) hasReadyQueuedTask(excludeID string) bool {
 	for _, task := range s.m.List() {
 		lifecycle := task.lifecycleSnapshot()
-		if task.ID != excludeID && lifecycle.Queued && !lifecycle.Paused && !isTerminalStatus(lifecycle.Status) && s.engine.ReadyFor(task) {
+		if task.ID != excludeID && lifecycle.Queued && !lifecycle.Paused && !isTerminalStatus(lifecycle.Status) &&
+			task.windowSnapshot().allowed(time.Now()) && s.engine.ReadyFor(task) {
 			return true
 		}
 	}
@@ -225,6 +233,9 @@ func (s *Server) hasReadyQueuedTask(excludeID string) bool {
 }
 
 func (s *Server) startAdmittedTask(t *Task, mode string) {
+	if !t.windowSnapshot().allowed(time.Now()) {
+		return
+	}
 	if mode == "bootstrap" {
 		if !s.engine.beginTaskOperation(t.ID) {
 			return
@@ -325,7 +336,7 @@ func (s *Server) reconcileConcurrency() {
 		// Keep FIFO order, but do not consume a concurrency slot for a task
 		// whose explicit chain/global provider is unavailable. It will be retried
 		// after the user configures or resets its LLM chain.
-		if lifecycle.Paused || (enabled && !s.engine.ReadyFor(task)) {
+		if lifecycle.Paused || !task.windowSnapshot().allowed(time.Now()) || (enabled && !s.engine.ReadyFor(task)) {
 			continue
 		}
 		mode := lifecycle.QueueMode
