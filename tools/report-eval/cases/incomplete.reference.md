@@ -40,3 +40,34 @@ Content-Length: 0
 ## 修复建议
 
 目前不能据此给出代码修复结论。请分别用 A、B 的获授权账号正常登录，保存 A 下载本人文件的完整响应，再用 B 请求同一文件并保存完整响应；核对两次响应内容和文件归属。
+
+<!-- artex:bound-traffic-evidence -->
+
+### 固定样本原始材料
+
+以下材料来自离线合成夹具，独立于报告正文保存。
+
+**请求他人文件**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+GET /api/files/file-a/download HTTP/1.1
+Host: report-eval.invalid
+X-Eval-Actor: user-b
+Content-Length: 0
+
+
+```
+
+响应包：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/octet-stream
+Content-Length: 48
+
+
+```

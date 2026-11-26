@@ -2,7 +2,10 @@ package server
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -80,5 +83,112 @@ func TestValidatePassword(t *testing.T) {
 				t.Fatalf("validatePassword(%q)=%q, wantErr=%v", tc.pw, got, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestExtractTokenRejectsAmbientCredentialsOnUnsafeMethods(t *testing.T) {
+	tests := []struct {
+		name          string
+		method        string
+		path          string
+		host          string
+		cookieName    string
+		cookie        string
+		authorization string
+		want          string
+	}{
+		{name: "GET cookie", method: http.MethodGet, path: "/api/tasks", cookie: "cookie-token", want: "cookie-token"},
+		{name: "HEAD cookie", method: http.MethodHead, path: "/api/tasks", cookie: "cookie-token", want: "cookie-token"},
+		{name: "POST cookie", method: http.MethodPost, path: "/api/tasks", cookie: "cookie-token"},
+		{name: "GET query outside SSE", method: http.MethodGet, path: "/api/tasks?token=query-token"},
+		{name: "GET SSE query", method: http.MethodGet, path: "/api/logs/stream?token=query-token", want: "query-token"},
+		{name: "SSE query overrides cookie from another instance", method: http.MethodGet, path: "/api/logs/stream?token=current-token", host: "127.0.0.1:8787", cookieName: "artex_token_p8787", cookie: "stale-token", want: "current-token"},
+		{name: "port-scoped cookie", method: http.MethodGet, path: "/api/tasks", host: "127.0.0.1:8787", cookieName: "artex_token_p8787", cookie: "current-token", want: "current-token"},
+		{name: "legacy shared cookie is ignored on non-default port", method: http.MethodGet, path: "/api/tasks", host: "127.0.0.1:8787", cookieName: "artex_token", cookie: "stale-token"},
+		{name: "cookie from another port is ignored", method: http.MethodGet, path: "/api/tasks", host: "127.0.0.1:8787", cookieName: "artex_token_p18787", cookie: "other-instance-token"},
+		{name: "POST SSE query", method: http.MethodPost, path: "/api/logs/stream?token=query-token"},
+		{name: "POST bearer", method: http.MethodPost, path: "/api/tasks", authorization: "Bearer header-token", want: "header-token"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(tc.method, tc.path, nil)
+			if tc.host != "" {
+				r.Host = tc.host
+			}
+			if tc.cookie != "" {
+				cookieName := tc.cookieName
+				if cookieName == "" {
+					cookieName = "artex_token"
+				}
+				r.AddCookie(&http.Cookie{Name: cookieName, Value: tc.cookie})
+			}
+			if tc.authorization != "" {
+				r.Header.Set("Authorization", tc.authorization)
+			}
+			if got := extractToken(r); got != tc.want {
+				t.Fatalf("extractToken()=%q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAuthCookieNameUsesNonDefaultPort(t *testing.T) {
+	tests := []struct {
+		host string
+		want string
+	}{
+		{host: "127.0.0.1:8787", want: "artex_token_p8787"},
+		{host: "127.0.0.1:18787", want: "artex_token_p18787"},
+		{host: "[::1]:8787", want: "artex_token_p8787"},
+		{host: "example.com", want: "artex_token"},
+		{host: "example.com:80", want: "artex_token"},
+		{host: "example.com:443", want: "artex_token"},
+		{host: "example.com:invalid", want: "artex_token"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.host, func(t *testing.T) {
+			if got := authCookieName(tc.host); got != tc.want {
+				t.Fatalf("authCookieName(%q)=%q, want %q", tc.host, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRotateJWTKeyInvalidatesPreviouslySignedTokens(t *testing.T) {
+	path := filepath.Join(t.TempDir(), jwtKeyFilename)
+	oldKey := []byte(strings.Repeat("old-key-", 4))
+	if err := os.WriteFile(path, oldKey, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldToken, err := signJWT(oldKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{jwtKeyPath: path, jwtKey: oldKey}
+	if err := s.rotateJWTKey(); err != nil {
+		t.Fatal(err)
+	}
+	newKey := s.jwtKeySnapshot()
+	if string(newKey) == string(oldKey) {
+		t.Fatal("JWT key did not change")
+	}
+	if verifyJWT(oldToken, newKey) {
+		t.Fatal("token signed by the previous key remained valid")
+	}
+
+	persisted, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(persisted) != string(newKey) {
+		t.Fatal("rotated JWT key was not persisted")
+	}
+	newToken, err := signJWT(newKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verifyJWT(newToken, persisted) {
+		t.Fatal("token signed by the rotated key is invalid")
 	}
 }

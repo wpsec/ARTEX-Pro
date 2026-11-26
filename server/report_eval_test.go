@@ -318,12 +318,13 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 	prompt := deliveryReportCompletionSystem()
 	for _, required := range []string{
 		"本次只生成交付报告草稿，不调用工具",
-		"平台生成标题、CVSS 行、五节标题和原始报文附件",
+		"平台生成标题、含完整向量、分数和等级的 CVSS 4.0 评分行、五节标题和原始报文附件",
 		"只返回这个 JSON 对象",
+		`{"cvss_vector":"","description":"","attack_chain":"","test_process":"","burp_reproduction":"","remediation":""}`,
 		"description 用短句写问题、成立条件、观察结果和评分依据",
 		"test_process 第一行必须为“测试时间：<test_time_hint>”",
 		"burp_reproduction 对 HTTP 场景附最小必要请求包",
-		"不得把它写成已在 Burp 中发送或验证",
+		"不得声称已通过 Burp 发送或验证",
 		"attack_chain 不超过 230 字",
 		"attack_chain 只写一棵短树。单一流程的根节点使用实际页面或功能入口",
 		"HTTP 节点原样复制 METHOD/path",
@@ -360,10 +361,8 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"正文以 800 字为参考预算",
 		"无身份、真假条件等独立对照放在独立分支，不接在主流程之后造成因果暗示",
 		"除第一行根节点外，攻击链代码块中每个非空行都必须以“├─”或“└─”开始",
-		"不另设定级子标题",
+		"不另加定级子标题",
 		"不加子标题",
-		"## Burp 复现",
-		"## 修复建议",
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("report completion prompt is missing %q", required)
@@ -956,10 +955,11 @@ func TestStripDeliveryDraftSectionHeading(t *testing.T) {
 
 func TestEnsureDeliveryAttackChainTextFence(t *testing.T) {
 	plain := "普通用户登录\n└─ GET /api/me\n   └─ 返回用户信息"
-	if got, want := ensureDeliveryAttackChainTextFence(plain), "```text\n"+plain+"\n```"; got != want {
+	formatted := "```text\n普通用户登录\n   └─ GET /api/me\n      └─ 返回用户信息\n```"
+	if got, want := ensureDeliveryAttackChainTextFence(plain), formatted; got != want {
 		t.Fatalf("plain chain=%q, want %q", got, want)
 	}
-	if got, want := ensureDeliveryAttackChainTextFence("text\n"+plain), "```text\n"+plain+"\n```"; got != want {
+	if got, want := ensureDeliveryAttackChainTextFence("text\n"+plain), formatted; got != want {
 		t.Fatalf("chain with duplicated language label=%q, want %q", got, want)
 	}
 	arrowChain := "入口：普通用户登录 -> POST /api/jobs/job-a/types -> 作业状态发生变化"
@@ -974,7 +974,7 @@ func TestEnsureDeliveryAttackChainTextFence(t *testing.T) {
 		t.Fatalf("down arrow in prose changed the tree: %q", got)
 	}
 	misaligned := "登记请求\n└─ 并发提交相同编号\n   ├─ 请求 A 返回 201\n│  └─ 回读查询得到三条记录"
-	if got, want := ensureDeliveryAttackChainTextFence(misaligned), "```text\n登记请求\n└─ 并发提交相同编号\n   ├─ 请求 A 返回 201\n   └─ 回读查询得到三条记录\n```"; got != want {
+	if got, want := ensureDeliveryAttackChainTextFence(misaligned), "```text\n登记请求\n   └─ 并发提交相同编号\n      ├─ 请求 A 返回 201\n      └─ 回读查询得到三条记录\n```"; got != want {
 		t.Fatalf("misaligned tree=%q, want %q", got, want)
 	}
 	decorated := "```text\n用户已登录且知晓目标作业编号\n   └─ ↓\n   └─ POST /api/jobs/job-a/types\n   └─ ↓\n   └─ 服务端未校验所有权，直接接受修改\n```"
@@ -1029,7 +1029,7 @@ func TestEnsureDeliveryAttackChainTextFence(t *testing.T) {
 	if got := ensureDeliveryAttackChainTextFence(ambiguous); got != "```text\n"+ambiguous+"\n```" {
 		t.Fatalf("ambiguous branches were converted to a sequence: %q", got)
 	}
-	fenced := "```text\n" + plain + "\n```"
+	fenced := formatted
 	if got := ensureDeliveryAttackChainTextFence(fenced); got != fenced {
 		t.Fatalf("already fenced chain changed: %q", got)
 	}

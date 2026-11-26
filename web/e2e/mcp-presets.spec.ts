@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 
 import { randomUUID } from "node:crypto";
 
+import { authCookieName } from "../src/lib/auth-cookie";
+
 const mcpSecretRef = (name: string) => `\${ARTEX_MCP_SECRET_${name}}`;
 
 test("ZAP preset stays disabled and unassigned", async ({ context, page, baseURL }) => {
@@ -10,7 +12,8 @@ test("ZAP preset stays disabled and unassigned", async ({ context, page, baseURL
   const savedConfigs: Record<string, unknown>[] = [];
   const writeRequests: string[] = [];
 
-  await context.addCookies([{ name: "artex_token", value: token, url: baseURL }]);
+  const name = authCookieName(new URL(baseURL).port);
+  await context.addCookies([{ name, value: token, url: baseURL }]);
   await context.addInitScript((value) => {
     localStorage.setItem("artex_token", value);
   }, token);

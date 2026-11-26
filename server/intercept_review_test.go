@@ -3,13 +3,16 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"iter"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Autumn-27/norma/llm"
+	"github.com/wpsec/ARTEX-local/agent"
 	"github.com/wpsec/ARTEX-local/db"
 	"github.com/wpsec/ARTEX-local/intercept"
-	"github.com/Autumn-27/norma/llm"
 )
 
 type reviewCaptureProvider struct{ request llm.CompletionRequest }
@@ -20,6 +23,7 @@ func (p *reviewCaptureProvider) Stream(_ context.Context, request llm.Completion
 		yield(llm.StreamEvent{Type: llm.SETextDelta, Text: `{"decision":"ask","comment":"实际操作：删除文件；成功后的后果：文件会丢失，归属尚未确认；命中规则：ASK（归属不明）"}`}, nil)
 	}
 }
+
 func (p *reviewCaptureProvider) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
 	return accumulateStreamForTest(ctx, p.Stream, req)
 }
@@ -72,5 +76,40 @@ func TestReviewCompletionSendsCurrentCallWithoutHistory(t *testing.T) {
 	}
 	if got.Version != 4 || got.Background == nil || got.Background.Source != intercept.BackgroundUserMessage || got.Background.Text != "清理本次测试文件" || got.WorkingDir != "/tmp/review-fixture" || string(got.Arguments) != string(args) || strings.Contains(body, "worker speculation") || strings.Contains(body, "GLOBAL_OVERVIEW_SENTINEL") {
 		t.Fatalf("wrong model input: %s", body)
+	}
+}
+
+func TestReviewCompletionRetryPolicy(t *testing.T) {
+	transient := errors.New("anthropic: overloaded_error")
+	rejected := errors.New("anthropic: status 400: invalid request")
+	for _, tc := range []struct {
+		name      string
+		failure   error
+		failures  int
+		attempts  int
+		wantCalls int
+		wantText  string
+		wantErr   error
+	}{
+		{name: "transient recovery", failure: transient, failures: 1, attempts: 4, wantCalls: 2, wantText: "synthetic verdict"},
+		{name: "persistent transient failure", failure: transient, failures: 4, attempts: 4, wantCalls: 2, wantErr: transient},
+		{name: "deterministic rejection", failure: rejected, failures: 4, attempts: 4, wantCalls: 1, wantErr: rejected},
+		{name: "retries disabled", failure: transient, failures: 4, attempts: -1, wantCalls: 1, wantErr: transient},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := &flakyThenOKProvider{
+				failCount: tc.failures,
+				failErr:   tc.failure,
+				okEvents:  []llm.StreamEvent{{Type: llm.SETextDelta, Text: "synthetic verdict"}},
+			}
+			policy := agent.RetryConfig{StreamAttempts: tc.attempts, StreamInterval: time.Millisecond}
+			result, err := reviewCompletionWithRetry(t.Context(), provider, "synthetic review", intercept.ReviewInput{}, policy)
+			if provider.calls != tc.wantCalls {
+				t.Fatalf("provider calls = %d, want %d", provider.calls, tc.wantCalls)
+			}
+			if result != tc.wantText || !errors.Is(err, tc.wantErr) {
+				t.Fatalf("review completion = (%q, %v), want (%q, %v)", result, err, tc.wantText, tc.wantErr)
+			}
+		})
 	}
 }

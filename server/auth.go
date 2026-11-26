@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -179,13 +181,28 @@ func extractToken(r *http.Request) string {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return ""
 	}
-	if c, err := r.Cookie("artex_token"); err == nil && c.Value != "" {
+	if sseQueryTokenPath(r.URL.Path) {
+		// Browsers send same-host cookies across ports, so the SSE token must identify its source instance.
+		if token := r.URL.Query().Get("token"); token != "" {
+			return token
+		}
+	}
+	if c, err := r.Cookie(authCookieName(r.Host)); err == nil && c.Value != "" {
 		return c.Value
 	}
-	if sseQueryTokenPath(r.URL.Path) {
-		return r.URL.Query().Get("token")
-	}
 	return ""
+}
+
+func authCookieName(host string) string {
+	_, rawPort, err := net.SplitHostPort(host)
+	if err != nil {
+		return "artex_token"
+	}
+	port, err := strconv.Atoi(rawPort)
+	if err != nil || port < 1 || port > 65535 || port == 80 || port == 443 {
+		return "artex_token"
+	}
+	return fmt.Sprintf("artex_token_p%d", port)
 }
 
 func sseQueryTokenPath(path string) bool {

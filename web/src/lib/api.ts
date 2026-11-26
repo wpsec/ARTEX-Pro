@@ -106,9 +106,13 @@ import type {
   WorkspaceListing,
 } from "@/lib/types";
 
+import { AUTH_TOKEN_KEY, authCookieMatchesToken, clearAuthCookie, syncAuthCookie } from "./auth-cookie";
+
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("artex_token");
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (token) syncAuthCookie(token, window.location.port);
+  return token;
 }
 
 export async function http<T>(path: string, init?: RequestInit): Promise<T> {
@@ -124,8 +128,8 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (r.status === 401) {
     if (typeof window !== "undefined") {
-      localStorage.removeItem("artex_token");
-      document.cookie = "artex_token=; path=/; max-age=0";
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+      clearAuthCookie(window.location.port);
       window.location.href = "/login";
     }
     throw new Error("未授权");
@@ -158,8 +162,10 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
 //
 // Dev (next dev): SSE must NOT go through the Next.js `/api` rewrite — that proxy
 // buffers the streamed response, so event frames never reach the browser (the
-// EventSource opens but receives 0 messages). So in dev only we connect straight
-// to the Go backend on :8787, whose CORS is open.
+// EventSource opens but receives 0 messages). The standard Next dev ports connect
+// straight to the Go backend on :8787. Nonstandard ports use same-origin so a
+// separately mapped ARTEX instance does not accidentally connect to another
+// instance on the same host's :8787; custom Next dev ports can set the override.
 //
 // Override either default with NEXT_PUBLIC_SSE_BASE (set it to "" to force same-origin).
 // Same-origin streams use the auth cookie; cross-origin streams need a query token
@@ -190,14 +196,16 @@ function mockReport(_task?: string): string {
 export function sseUrl(path: string): string {
   const base =
     process.env.NEXT_PUBLIC_SSE_BASE ??
-    (process.env.NODE_ENV !== "production" && typeof window !== "undefined"
+    (process.env.NODE_ENV !== "production" &&
+    typeof window !== "undefined" &&
+    ["3000", "5173"].includes(window.location.port)
       ? `${window.location.protocol}//${window.location.hostname}:8787`
       : "");
   const token = getToken();
   const target = `${base}${path}`;
   const sameOrigin =
     typeof window !== "undefined" && new URL(target, window.location.href).origin === window.location.origin;
-  if (!token || sameOrigin) {
+  if (!token || (sameOrigin && authCookieMatchesToken(token, window.location.port))) {
     return target;
   }
   const sep = path.includes("?") ? "&" : "?";

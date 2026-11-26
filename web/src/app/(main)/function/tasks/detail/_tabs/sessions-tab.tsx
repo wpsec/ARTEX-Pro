@@ -100,6 +100,25 @@ const SYSTEM_SCAN_PAGE = 500; // generic activity pages scanned to recover spars
 const MAX_KEEP = 4000; // per-session in-memory cap; older pages re-fetched on scroll-up
 const STREAM_WINDOW_MS = 5000; // "live" = activity seen within this window
 const MAX_WORKER_MESSAGE_CHARS = 4000;
+type SSEConnectionStatus = "connecting" | "connected" | "reconnecting" | "closed";
+const SSE_CONNECTION_STATUS: Record<SSEConnectionStatus, { label: string; title: string; className: string }> = {
+  connecting: {
+    label: "连接中",
+    title: "正在建立实时连接（历史仍可见）",
+    className: "text-amber-500",
+  },
+  connected: { label: "实时", title: "实时连接正常", className: "text-emerald-500" },
+  reconnecting: {
+    label: "重连中",
+    title: "实时连接中断，正在自动重连（历史仍可见）",
+    className: "text-amber-500",
+  },
+  closed: {
+    label: "已断开",
+    title: "实时连接已关闭，不会自动重连；请检查服务地址和网络（历史仍可见）",
+    className: "text-destructive",
+  },
+};
 
 function newWorkerMessageRequestID(): string {
   return (
@@ -631,9 +650,9 @@ export function SessionsTab({ taskId }: { taskId: string }) {
     [controllingIntent, patchIntentState, taskId],
   );
 
-  // SSE connection state — surfaced so a dropped realtime link is visible, never
-  // silently shown as "no messages".
-  const [sseLive, setSseLive] = React.useState(false);
+  // Keep initial connection and reconnecting distinct so a first dial failure is
+  // not presented as a reconnect after a connection that never existed.
+  const [sseStatus, setSseStatus] = React.useState<SSEConnectionStatus>("connecting");
   // Whole-task token total (all agents), polled from the backend aggregate.
   const [taskTokens, setTaskTokens] = React.useState<TokenTotal | null>(null);
   const [sessionTokens, setSessionTokens] = React.useState<Record<string, SessionTokenUsage>>({});
@@ -886,7 +905,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
     setTaskTokens(null);
     setSessionTokens({});
     setLLMResolutions(null);
-    setSseLive(false);
+    setSseStatus("connecting");
     setActiveId(MAIN_ID); // a stale worker id from the previous task must not leak in
     setMainSegs([{ seq: 0, created_at: "" }]);
     setCurrentSeg(0);
@@ -897,6 +916,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
     // mount) won't double-load it and pre-empt the SSE opened here.
     loadingKeysRef.current = new Set([mainSessionKey(0)]);
     let alive = true;
+    let sseOpened = false;
 
     // MOCK demo: no SSE backend — pull one activity snapshot and bucket by session.
     if (MOCK) {
@@ -973,9 +993,23 @@ export function SessionsTab({ taskId }: { taskId: string }) {
           sseUrl(`/api/exploration/activity/stream?task=${encodeURIComponent(taskId)}&since=${snapshotRef.current}`),
         );
         esRef.current = es;
-        es.onopen = () => setSseLive(true);
-        es.onerror = () => setSseLive(false); // EventSource auto-reconnects; DB compensates the gap
+        es.onopen = () => {
+          if (!alive) return;
+          sseOpened = true;
+          setSseStatus("connected");
+        };
+        es.onerror = () => {
+          if (!alive) return;
+          if (es.readyState === EventSource.CLOSED) {
+            setSseStatus("closed");
+          } else if (sseOpened) {
+            setSseStatus("reconnecting");
+          } else {
+            setSseStatus("connecting");
+          }
+        };
         es.onmessage = (e) => {
+          if (!alive) return;
           let a: Activity;
           try {
             a = JSON.parse(e.data) as Activity;
@@ -1605,19 +1639,32 @@ export function SessionsTab({ taskId }: { taskId: string }) {
                 <span
                   className={cn(
                     "inline-flex items-center gap-1 text-[10px]",
-                    sseLive ? "text-emerald-500" : "text-amber-500",
+                    SSE_CONNECTION_STATUS[sseStatus].className,
                   )}
-                  title={sseLive ? "实时连接正常" : "实时连接中断，正在自动重连（历史仍可见）"}
+                  title={SSE_CONNECTION_STATUS[sseStatus].title}
                 >
-                  {sseLive ? (
+                  {sseStatus === "connected" && (
                     <>
                       <span className="size-1 animate-pulse rounded-full bg-emerald-500" />
-                      实时
+                      {SSE_CONNECTION_STATUS[sseStatus].label}
                     </>
-                  ) : (
+                  )}
+                  {sseStatus === "connecting" && (
+                    <>
+                      <Loader2Icon className="size-3 animate-spin" />
+                      {SSE_CONNECTION_STATUS[sseStatus].label}
+                    </>
+                  )}
+                  {sseStatus === "reconnecting" && (
                     <>
                       <WifiOffIcon className="size-3" />
-                      重连中
+                      {SSE_CONNECTION_STATUS[sseStatus].label}
+                    </>
+                  )}
+                  {sseStatus === "closed" && (
+                    <>
+                      <WifiOffIcon className="size-3" />
+                      {SSE_CONNECTION_STATUS[sseStatus].label}
                     </>
                   )}
                 </span>

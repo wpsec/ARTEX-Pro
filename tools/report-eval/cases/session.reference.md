@@ -40,3 +40,108 @@ Content-Length: 0
 ## 修复建议
 
 退出时由服务端撤销当前会话，并在后续请求中检查撤销状态。仅删除客户端 Cookie 不能阻止旧会话重放；当前会话实现和代码位置未核实。
+
+<!-- artex:bound-traffic-evidence -->
+
+### 固定样本原始材料
+
+以下材料来自离线合成夹具，独立于报告正文保存。
+
+**退出前查询**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+GET /api/me HTTP/1.1
+Host: report-eval.invalid
+Cookie: session=<SYNTHETIC_SESSION_A>
+Content-Length: 0
+
+
+```
+
+响应包：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 31
+
+{"id":"user-a","role":"member"}
+```
+
+**退出登录**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+POST /api/logout HTTP/1.1
+Host: report-eval.invalid
+Cookie: session=<SYNTHETIC_SESSION_A>
+Content-Length: 0
+
+
+```
+
+响应包：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 11
+
+{"ok":true}
+```
+
+**退出后重放原会话**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+GET /api/me HTTP/1.1
+Host: report-eval.invalid
+Cookie: session=<SYNTHETIC_SESSION_A>
+Content-Length: 0
+
+
+```
+
+响应包：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 31
+
+{"id":"user-a","role":"member"}
+```
+
+**不带会话查询**
+
+来源：离线合成报文，不对应真实网络请求
+
+请求包：
+
+```http
+GET /api/me HTTP/1.1
+Host: report-eval.invalid
+Content-Length: 0
+
+
+```
+
+响应包：
+
+```http
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+Content-Length: 35
+
+{"error":"authentication_required"}
+```

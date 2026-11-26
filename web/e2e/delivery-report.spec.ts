@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 
+import { authCookieName } from "../src/lib/auth-cookie";
 import { scoreCVSS4Base } from "../src/lib/cvss-v4";
 
 const officialVectors = [
@@ -53,9 +55,11 @@ test("CVSS-B scoring follows FIRST's reference lookup for a conflicting example"
 
 test("finding detail shows its paired delivery report with AI CVSS and copy", async ({ context, page, baseURL }) => {
   if (!baseURL) throw new Error("Playwright baseURL is required");
+  const token = randomUUID();
+  const name = authCookieName(new URL(baseURL).port);
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await context.addCookies([{ name: "artex_token", value: "delivery-report-e2e", url: baseURL }]);
-  await context.addInitScript(() => localStorage.setItem("artex_token", "delivery-report-e2e"));
+  await context.addCookies([{ name, value: token, url: baseURL }]);
+  await context.addInitScript((value) => localStorage.setItem("artex_token", value), token);
 
   const reportText = [
     "# 权限校验缺失",
