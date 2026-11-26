@@ -10,6 +10,78 @@ import (
 	"github.com/wpsec/ARTEX-local/agent"
 )
 
+func TestNormalizeDeliveryNarrativePreservesFactsAndOriginalRecords(t *testing.T) {
+	report := strings.Join([]string{
+		"# 测试样本",
+		"## 描述",
+		"普通账号能看到其他部门的目录（seq 5–11）。",
+		"## 测试过程",
+		"证据显示两次返回的列表逐字节相同（87 字节）。文件详情的响应（0 字节），内容未验证。",
+		"~~~text",
+		"逐字节相同（seq 5–11）",
+		"~~~",
+		"## 攻击链路",
+		"逐字节相同（seq 5–11）",
+		"## 修复建议",
+		"服务端返回目录前先核对访问权限。",
+		deliveryEvidenceAppendixMarker,
+		"## 测试过程",
+		"逐字节相同（seq 5–11）",
+	}, "\r\n")
+	want := strings.Replace(
+		report,
+		"普通账号能看到其他部门的目录（seq 5–11）。",
+		"普通账号能看到其他部门的目录。",
+		1,
+	)
+	want = strings.Replace(
+		want,
+		"证据显示两次返回的列表逐字节相同（87 字节）。文件详情的响应（0 字节），内容未验证。",
+		"测试记录显示两次返回的列表完全相同。文件详情的响应（没有内容），内容未验证。",
+		1,
+	)
+	if got := normalizeDeliveryNarrative(report, false); got != want {
+		t.Fatalf("unexpected normalized report:\n%s", got)
+	}
+	if got := normalizeDeliveryNarrative("内容逐字节相同（seq 5–11）。", true); got != "内容完全相同。" {
+		t.Fatalf("structured draft field normalized to %q", got)
+	}
+}
+
+func TestNormalizeStructuredDeliveryTestProcess(t *testing.T) {
+	const time = "测试时间：未记录"
+	marker := agent.DeliveryReportTestFactsMarker
+	legacy := time + "\n其他部门的文件内容未验证。"
+	insideFence := time + "\n~~~text\n" + marker + "\n~~~"
+	for _, input := range []string{legacy, insideFence} {
+		if got := normalizeStructuredDeliveryTestProcess(input); got != input {
+			t.Fatalf("changed an unmarked test process: %q", got)
+		}
+	}
+	input := strings.Join([]string{
+		"", time, "", marker,
+		"未验证范围：现有记录无法确认响应包含用户列表。",
+		"  文件预览也未核实。",
+		"- **测试角色：** 部门成员。",
+		"复核分组记在台账的蓝色标签下。",
+		"~~~text", "实际结果：示例台账内容。", "~~~", "", "",
+	}, "\r\n")
+	want := strings.Join([]string{
+		"", time, "", marker,
+		"测试角色：部门成员。",
+		"预期行为：待核实。",
+		"实际结果：待核实。",
+		"未验证范围：现有记录无法确认响应包含用户列表。",
+		"  文件预览也未核实。", "", "",
+	}, "\r\n")
+	if got := normalizeStructuredDeliveryTestProcess(input); got != want {
+		t.Fatalf("unexpected marked test facts:\n%s", got)
+	}
+	if got := normalizeStructuredDeliveryTestProcess(want); got != want {
+		t.Fatalf("normalization changed existing continuations:\n%s", got)
+	}
+}
+
 func TestValidateDeliveryReportTemplate(t *testing.T) {
 	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
 	valid := deliveryReportFixture("重复请求的实际影响未验证。", vector)

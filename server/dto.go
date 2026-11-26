@@ -313,18 +313,20 @@ type FindingDTO struct {
 	EvidenceQuotes        []db.FindingEvidenceQuote  `json:"evidence_quotes"`
 	Counterevidence       string                     `json:"counterevidence"`
 
-	ID                       string `json:"id"`
-	FindingID                string `json:"finding_id,omitempty"` // standalone findings-table id — the handle for status updates
-	VulnClass                string `json:"vulnclass"`
-	Name                     string `json:"name,omitempty"` // 漏洞名称;为空时前端回退展示 vulnclass
-	Severity                 string `json:"severity"`       // critical | high | medium | low
-	Status                   string `json:"status"`         // pending | in_progress | confirmed | resolved | fixed | false_positive | ignored | duplicate | risk_accepted
-	Summary                  string `json:"summary"`
-	Evidence                 string `json:"evidence"`
-	Report                   string `json:"report,omitempty"` // 详细报告(Markdown);仅详情接口返回,列表为空
-	DeliveryReport           string `json:"delivery_report,omitempty"`
-	DeliveryReportCVSSVector string `json:"delivery_report_cvss_vector,omitempty"`
-	DeliveryReportStale      bool   `json:"delivery_report_stale,omitempty"`
+	ID                                   string `json:"id"`
+	FindingID                            string `json:"finding_id,omitempty"` // standalone findings-table id — the handle for status updates
+	VulnClass                            string `json:"vulnclass"`
+	Name                                 string `json:"name,omitempty"` // 漏洞名称;为空时前端回退展示 vulnclass
+	Severity                             string `json:"severity"`       // critical | high | medium | low
+	Status                               string `json:"status"`         // pending | in_progress | confirmed | resolved | fixed | false_positive | ignored | duplicate | risk_accepted
+	Summary                              string `json:"summary"`
+	Evidence                             string `json:"evidence"`
+	Report                               string `json:"report,omitempty"` // 详细报告(Markdown);仅详情接口返回,列表为空
+	DeliveryReport                       string `json:"delivery_report,omitempty"`
+	DeliveryReportCVSSVector             string `json:"delivery_report_cvss_vector,omitempty"`
+	DeliveryReportEvidenceVersion        *int64 `json:"delivery_report_evidence_version,omitempty"`
+	DeliveryReportCurrentEvidenceVersion *int64 `json:"delivery_report_current_evidence_version,omitempty"`
+	DeliveryReportStale                  bool   `json:"delivery_report_stale,omitempty"`
 
 	IntentID        string            `json:"intent_id,omitempty"`
 	ParamID         string            `json:"param_id,omitempty"`

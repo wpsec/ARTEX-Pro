@@ -2117,6 +2117,8 @@ func (s *Server) getFinding(w http.ResponseWriter, r *http.Request) {
 		if delivery != nil && delivery.Exists {
 			dto.DeliveryReport = delivery.Content
 			dto.DeliveryReportCVSSVector = delivery.CVSSVector
+			dto.DeliveryReportEvidenceVersion = &delivery.EvidenceVersion
+			dto.DeliveryReportCurrentEvidenceVersion = &delivery.CurrentEvidenceVersion
 			dto.DeliveryReportStale = delivery.EvidenceVersion != delivery.CurrentEvidenceVersion
 		}
 	}

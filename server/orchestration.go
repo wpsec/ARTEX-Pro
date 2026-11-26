@@ -533,7 +533,8 @@ func (s *Server) toolUpdateFindingReport() actool.CoreTool {
 				if lookupErr != nil {
 					return actool.Errorf(lookupErr.Error()), nil
 				}
-				deliveryReport, appendErr := s.appendDeliveryTrafficEvidence(ctx, findingID, *a.EvidenceVersion, a.DeliveryReport)
+				narrative := normalizeDeliveryNarrative(a.DeliveryReport, false)
+				deliveryReport, appendErr := s.appendDeliveryTrafficEvidence(ctx, findingID, *a.EvidenceVersion, narrative)
 				if appendErr != nil {
 					return actool.Errorf("附加完整 HTTP 流量证据失败：" + appendErr.Error()), nil
 				}

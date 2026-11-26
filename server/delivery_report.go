@@ -487,12 +487,16 @@ func ensureDeliverySyntheticBoundary(content string) string {
 	if content == "" {
 		return content
 	}
+	const syntheticBoundary = "离线合成场景，未测试真实目标。"
+	if first, rest, _ := strings.Cut(content, "\n"); strings.TrimSpace(first) == agent.DeliveryReportFieldsMarker {
+		return agent.DeliveryReportFieldsMarker + "\n测试范围：" + syntheticBoundary + "\n" + rest
+	}
 	hasSyntheticScope := strings.Contains(content, "离线合成") || strings.Contains(content, "合成样本") || strings.Contains(content, "合成场景")
 	hasRealTargetLimit := strings.Contains(content, "未测试真实目标") || strings.Contains(content, "未访问真实目标") || strings.Contains(content, "未测试真实系统")
 	if hasSyntheticScope && hasRealTargetLimit {
 		return content
 	}
-	return "离线合成场景，未测试真实目标。\n\n" + content
+	return syntheticBoundary + "\n\n" + content
 }
 
 func normalizeDeliverySyntheticText(content string) string {
@@ -1695,6 +1699,9 @@ func parseDeliveryReportDraft(
 	draft.Description = stripRedundantDeliveryDraftSubheading(draft.Description, "描述")
 	draft.Remediation = stripRedundantDeliveryDraftSubheading(draft.Remediation, "修复建议")
 	draft.TestProcess = stripRedundantDeliveryDraftSubheading(draft.TestProcess, "测试过程")
+	draft.Description = normalizeDeliveryNarrative(normalizeStructuredDeliveryDescription(draft.Description), true)
+	draft.Remediation = normalizeDeliveryNarrative(normalizeStructuredDeliveryRemediation(draft.Remediation), true)
+	draft.TestProcess = normalizeDeliveryNarrative(normalizeStructuredDeliveryTestProcess(draft.TestProcess), true)
 	draft.AttackChain = stripDeliveryDraftSectionHeading(draft.AttackChain, "攻击链路")
 	draft.AttackChain = stripRedundantDeliveryDraftSubheading(draft.AttackChain, "攻击链路")
 	draft.AttackChain = ensureDeliveryAttackChainTextFenceWithEvidence(

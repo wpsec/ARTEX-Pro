@@ -508,6 +508,8 @@ export interface Finding {
   report?: string; // 详细报告(Markdown);仅详情接口返回,列表为空
   delivery_report?: string;
   delivery_report_cvss_vector?: string;
+  delivery_report_evidence_version?: number;
+  delivery_report_current_evidence_version?: number;
   delivery_report_stale?: boolean;
   intent_id?: string;
   param_id?: string;
