@@ -10,6 +10,7 @@ import { toast } from "sonner";
 
 import { StatusBadge } from "@/components/status-badge";
 import { TaskLLMProfileChain } from "@/components/task-llm-profile-chain";
+import { TaskRunWindowStatus } from "@/components/task-run-window";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -249,13 +250,14 @@ function TaskDetailInner() {
     };
   }, [id]);
 
-  const taskLoadInFlight = React.useRef<string | null>(null);
+  const taskLoadInFlight = React.useRef<{ id: string } | null>(null);
   const load = React.useCallback(() => {
-    if (taskLoadInFlight.current === id) return;
-    taskLoadInFlight.current = id;
+    if (taskLoadInFlight.current?.id === id) return;
+    const request = { id };
+    taskLoadInFlight.current = request;
     Promise.all([api.task(id), api.stats(id).catch(() => null)])
       .then(([task, s]) => {
-        if (taskLoadInFlight.current !== id) return;
+        if (taskLoadInFlight.current !== request) return;
         const base = { ...task };
         const at = s?.active_task;
         if (at) {
@@ -272,7 +274,7 @@ function TaskDetailInner() {
         // Keep the last rendered task state during a transient poll failure.
       })
       .finally(() => {
-        if (taskLoadInFlight.current === id) {
+        if (taskLoadInFlight.current === request) {
           taskLoadInFlight.current = null;
           setLoaded(true);
         }
@@ -375,7 +377,9 @@ function TaskDetailInner() {
           </code>
           <Separator orientation="vertical" className="mx-1 hidden h-4 sm:block" />
           <TaskLLMControl task={task} profiles={profiles} onUpdated={load} />
-          <StatusBadge domain={terminal ? "task" : "engine"} value={terminal ? task.status : engineMode} dot />
+          {task.run_window_status !== "pausing" && (
+            <StatusBadge domain={terminal ? "task" : "engine"} value={terminal ? task.status : engineMode} dot />
+          )}
           {canArchive ? (
             <AlertDialog>
               <AlertDialogTrigger asChild>{archiveTrigger}</AlertDialogTrigger>
@@ -401,12 +405,20 @@ function TaskDetailInner() {
               <TooltipContent>{archiveDisabledReason}</TooltipContent>
             </Tooltip>
           )}
-          <Button size="sm" variant={controlVariant} onClick={togglePause} disabled={terminal}>
+          <Button
+            size="sm"
+            variant={controlVariant}
+            onClick={togglePause}
+            disabled={
+              terminal || (paused && (task.run_window_status === "closed" || task.run_window_status === "pausing"))
+            }
+          >
             {controlIcon}
             {controlLabel}
           </Button>
         </div>
         <p className="truncate text-xs text-muted-foreground">{task.goal}</p>
+        <TaskRunWindowStatus task={task} />
         {/* Tabs */}
         <div className="no-scrollbar min-w-0 overflow-x-auto">
           <TabsList variant="default" className="min-w-max">

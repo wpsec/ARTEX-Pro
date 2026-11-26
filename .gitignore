@@ -27,6 +27,7 @@ web/next-env.d.ts
 # docs
 /docs/*
 !/docs/交付报告规范.md
+!/docs/2026-11-26-任务运行窗口.md
 
 # os
 .DS_Store
