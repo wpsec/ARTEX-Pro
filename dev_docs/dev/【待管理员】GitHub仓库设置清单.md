@@ -1,8 +1,10 @@
-# 【未开始】GitHub 仓库设置清单
+# 【待管理员】GitHub 仓库设置清单
 
 以下设置需在 GitHub 仓库设置中启用；本地文件无法替代远端分支规则。
 
-2026-11-26 工作流与公开 Actions 复核：CI 的四个必需检查名与 workflow job 名称一致，push/PR 触发分支包含 `main` 和 `artex-dev`；CI 与 Release 共 26 个 Actions 引用均固定到完整 40 位 commit SHA。公开 API 确认 `52707a3` 的 CI 全绿，远端最新 `71777276` 的 Browser regression 失败；原始日志接口未经认证返回 403。此检查不代表 GitHub 远端保护规则已配置。
+2026-11-26 已确认本地及 GitHub 长期分支均为 `main`、`artex-dev`、`artex-native-backup`，旧 `artex-pro` 已清理。
+
+2026-11-26 公开 API 确认默认分支为 `main`，`main` 的应用规则列表为空，`main` 和 `artex-native-backup` 均返回 `protected=false`。CI 的四个必需检查名与 workflow job 名称一致，push/PR 触发分支包含 `main` 和 `artex-dev`。远端规则待管理员应用。[浏览器 CI 回归记录](../history/【已完成】2026-11-26-浏览器CI回归.md) · [公开规则列表](https://api.github.com/repos/wpsec/ARTEX-Pro/rules/branches/main)
 
 ## 需要的用户配合
 
