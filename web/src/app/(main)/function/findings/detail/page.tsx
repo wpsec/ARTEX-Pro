@@ -92,6 +92,11 @@ function FindingDetailInner() {
   React.useEffect(() => {
     load();
   }, [load]);
+  React.useEffect(() => {
+    if (loaded && finding && tab === "overview" && window.location.hash === "#detailed-report") {
+      document.getElementById("detailed-report")?.scrollIntoView();
+    }
+  }, [finding, loaded, tab]);
 
   const changeSeverity = React.useCallback(
     async (next: Severity) => {
@@ -223,12 +228,8 @@ function FindingDetailInner() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">
-                      {evidenceCheckLabel(finding.evidence_check_status)}
-                    </Badge>
-                    <span className="text-muted-foreground text-xs">
-                      原文匹配仅用于定位证据，不代表漏洞已确认。
-                    </span>
+                    <Badge variant="outline">{evidenceCheckLabel(finding.evidence_check_status)}</Badge>
+                    <span className="text-muted-foreground text-xs">原文匹配仅用于定位证据，不代表漏洞已确认。</span>
                   </div>
                   {finding.evidence_check_note && (
                     <p className="text-muted-foreground text-sm">{finding.evidence_check_note}</p>
@@ -263,7 +264,7 @@ function FindingDetailInner() {
                 onChanged={load}
               />
               {/* 证据下方：详细报告(Markdown 渲染) */}
-              <Card>
+              <Card id="detailed-report" className="scroll-mt-44">
                 <CardHeader className="flex-row items-center justify-between">
                   <CardTitle className="text-sm">详细报告</CardTitle>
                   {finding.report && <CopyButton text={finding.report} successMessage="已复制详细报告" />}

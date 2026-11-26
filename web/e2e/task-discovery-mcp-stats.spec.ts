@@ -1,9 +1,8 @@
 import type { BrowserContext, Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 
-import { randomUUID } from "node:crypto";
-
 import { authCookieName } from "../src/lib/auth-cookie";
+import { randomUUID } from "node:crypto";
 
 async function authenticateAndMockAPI(
   context: BrowserContext,
@@ -84,6 +83,13 @@ test("task findings stay scoped and detail navigation returns to the task tab", 
             task_id: "99",
             name: "其他任务发现",
           },
+          {
+            ...finding,
+            id: "node-legacy",
+            finding_id: undefined,
+            name: "未归档发现",
+            evidence: "旧记录证据",
+          },
         ];
       }
       if (pathname === "/api/exploration/findings/11") return finding;
@@ -103,7 +109,18 @@ test("task findings stay scoped and detail navigation returns to the task tab", 
   await expect(page.getByText("当前任务发现", { exact: true })).toBeVisible();
   await expect(page.getByText("其他任务发现", { exact: true })).toHaveCount(0);
 
-  await page.getByRole("link", { name: "详情" }).click();
+  const findingLink = page.getByRole("link", { name: /当前任务发现/ });
+  const detailHref = "/function/findings/detail?id=11&context_task=42";
+  await expect(findingLink).toHaveAttribute("href", detailHref);
+  await expect(page.getByRole("link", { name: "详情", exact: true })).toHaveAttribute("href", detailHref);
+  await page.getByRole("button", { name: "展开证据", exact: true }).click();
+  await expect(page.getByText("合成证据", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "收起证据", exact: true }).click();
+  await expect(page.getByText("合成证据", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: /未归档发现/ }).click();
+  await expect(page.getByText("旧记录证据", { exact: true })).toBeVisible();
+
+  await findingLink.getByText(finding.summary, { exact: true }).click();
   await expect(page).toHaveURL(/\/function\/findings\/detail\?id=11&context_task=42$/);
   await expect(page.getByRole("heading", { name: "当前任务发现" })).toBeVisible();
 

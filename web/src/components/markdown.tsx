@@ -1,6 +1,5 @@
 "use client";
 
-import * as React from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -15,8 +14,14 @@ const components: Components = {
   ul: ({ node, ...p }) => <ul className="my-1 list-disc space-y-0.5 pl-5" {...p} />,
   ol: ({ node, ...p }) => <ol className="my-1 list-decimal space-y-0.5 pl-5" {...p} />,
   strong: ({ node, ...p }) => <strong className="font-semibold" {...p} />,
-  a: ({ node, ...p }) => (
-    <a className="text-primary underline underline-offset-2" target="_blank" rel="noreferrer" {...p} />
+  a: ({ node, href, ...p }) => (
+    <a
+      className="text-primary underline underline-offset-2"
+      href={href}
+      target={href?.startsWith("#") ? undefined : "_blank"}
+      rel="noreferrer"
+      {...p}
+    />
   ),
   hr: () => <hr className="my-2 border-border" />,
   blockquote: ({ node, ...p }) => (
@@ -42,16 +47,22 @@ const components: Components = {
       <table className="w-full border-collapse text-xs" {...p} />
     </div>
   ),
-  th: ({ node, ...p }) => (
-    <th className="border border-border bg-muted/60 px-2 py-1 text-left font-medium" {...p} />
-  ),
+  th: ({ node, ...p }) => <th className="border border-border bg-muted/60 px-2 py-1 text-left font-medium" {...p} />,
   td: ({ node, ...p }) => <td className="border border-border px-2 py-1 align-top" {...p} />,
 };
 
-export function Markdown({ text }: { text: string }) {
+const reportComponents: Components = {
+  ...components,
+  h1: ({ node, ...p }) => <h2 className="mb-2 font-semibold text-xl" {...p} />,
+  h2: ({ node, ...p }) => <h3 className="mt-5 mb-2 font-semibold text-base" {...p} />,
+  h3: ({ node, ...p }) => <h4 className="mt-4 font-semibold text-sm" {...p} />,
+  h4: ({ node, ...p }) => <h5 className="mt-3 font-medium text-muted-foreground text-sm" {...p} />,
+};
+
+export function Markdown({ text, variant }: { text: string; variant?: "report" }) {
   return (
     <div className="min-w-0 space-y-1.5 text-sm [&>*:first-child]:mt-0">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={variant === "report" ? reportComponents : components}>
         {text}
       </ReactMarkdown>
     </div>

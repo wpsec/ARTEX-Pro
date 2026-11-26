@@ -51,30 +51,65 @@ function Row({
   onStatus: (f: Finding, next: FindingStatus) => void;
 }) {
   const [open, setOpen] = React.useState(false);
+  const detailHref = f.finding_id
+    ? `/function/findings/detail?id=${encodeURIComponent(f.finding_id)}&context_task=${encodeURIComponent(contextTaskId)}`
+    : undefined;
+  const chevron = (
+    <ChevronRightIcon
+      aria-hidden="true"
+      className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
+    />
+  );
+  const summary = (
+    <>
+      <StatusBadge domain="severity" value={f.severity} dot />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-medium group-hover:underline">{findingLabel(f)}</span>
+          {f.inherited && f.source_task_id && (
+            <Badge variant="outline" className="shrink-0">
+              来源 #{f.source_task_id} · 只读
+            </Badge>
+          )}
+        </div>
+        <span className="truncate text-xs text-muted-foreground">{f.summary}</span>
+      </div>
+    </>
+  );
   return (
     <div className="border-b last:border-b-0">
       <div className="flex w-full items-center gap-3 px-4 py-3 text-sm hover:bg-accent/40">
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left"
-        >
-          <ChevronRightIcon
-            className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
-          />
-          <StatusBadge domain="severity" value={f.severity} dot />
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="truncate font-medium">{findingLabel(f)}</span>
-              {f.inherited && f.source_task_id && (
-                <Badge variant="outline" className="shrink-0">
-                  来源 #{f.source_task_id} · 只读
-                </Badge>
-              )}
-            </div>
-            <span className="truncate text-xs text-muted-foreground">{f.summary}</span>
-          </div>
-        </button>
+        {detailHref ? (
+          <>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              className="-ml-1"
+              aria-label={open ? "收起证据" : "展开证据"}
+              aria-expanded={open}
+              onClick={() => setOpen((o) => !o)}
+            >
+              {chevron}
+            </Button>
+            <Link
+              href={detailHref}
+              className="group flex min-w-0 flex-1 items-center gap-3 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+              {summary}
+            </Link>
+          </>
+        ) : (
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={() => setOpen((o) => !o)}
+            className="flex min-w-0 flex-1 items-center gap-3 text-left"
+          >
+            {chevron}
+            {summary}
+          </button>
+        )}
         <Badge variant="outline">流量证据 {f.traffic_count ?? 0} 条</Badge>
         {f.assets && f.assets.length > 0 && (
           <div className="hidden shrink-0 flex-wrap justify-end gap-1 sm:flex">
@@ -111,15 +146,9 @@ function Row({
         <span className="hidden shrink-0 text-xs text-muted-foreground md:block">
           {new Date(f.ts).toLocaleString("zh-CN")}
         </span>
-        {f.finding_id && (
+        {detailHref && (
           <Button asChild size="sm" variant="outline" className="h-8 shrink-0 px-3">
-            <Link
-              href={
-                `/function/findings/detail?id=${encodeURIComponent(f.finding_id)}` +
-                `&context_task=${encodeURIComponent(contextTaskId)}`
-              }
-              title="查看漏洞详情"
-            >
+            <Link href={detailHref} title="查看漏洞详情">
               详情
               <ArrowUpRightIcon data-icon="inline-end" />
             </Link>

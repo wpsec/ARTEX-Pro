@@ -22,6 +22,13 @@ import { THEME_PRESET_OPTIONS, type ThemeMode, type ThemePreset } from "@/lib/pr
 import { applyThemePreset } from "@/lib/preferences/theme-utils";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
+const themePresetLabels = {
+  default: "默认",
+  brutalist: "粗野主义",
+  "soft-pop": "柔和亮彩",
+  tangerine: "橘色",
+} satisfies Record<ThemePreset, string>;
+
 export function LayoutControls() {
   const themeMode = usePreferencesStore((s) => s.themeMode);
   const resolvedThemeMode = usePreferencesStore((s) => s.resolvedThemeMode);
@@ -99,22 +106,22 @@ export function LayoutControls() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button size="icon">
+        <Button size="icon" aria-label="界面偏好">
           <Settings />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end">
         <div className="flex flex-col gap-5">
           <div className="space-y-1.5">
-            <h4 className="font-medium text-sm leading-none">Preferences</h4>
-            <p className="text-muted-foreground text-xs">Customize your dashboard layout preferences.</p>
+            <h4 className="font-medium text-sm leading-none">界面偏好</h4>
+            <p className="text-muted-foreground text-xs">自定义主题、字体和页面布局。</p>
           </div>
           <div className="space-y-3 **:data-[slot=toggle-group]:w-full **:data-[slot=toggle-group-item]:flex-1 **:data-[slot=toggle-group-item]:text-xs">
             <div className="space-y-1">
-              <Label className="font-medium text-xs">Theme Preset</Label>
+              <Label className="font-medium text-xs">主题预设</Label>
               <Select value={themePreset} onValueChange={onThemePresetChange}>
                 <SelectTrigger size="sm" className="w-full text-xs">
-                  <SelectValue placeholder="Preset" />
+                  <SelectValue placeholder="选择主题预设" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
@@ -127,7 +134,7 @@ export function LayoutControls() {
                               (resolvedThemeMode ?? "light") === "dark" ? preset.primary.dark : preset.primary.light,
                           }}
                         />
-                        {preset.label}
+                        {themePresetLabels[preset.value]}
                       </SelectItem>
                     ))}
                   </SelectGroup>
@@ -136,10 +143,10 @@ export function LayoutControls() {
             </div>
 
             <div className="space-y-1">
-              <Label className="font-medium text-xs">Fonts</Label>
+              <Label className="font-medium text-xs">字体</Label>
               <Select value={font} onValueChange={onFontChange}>
                 <SelectTrigger size="sm" className="w-full text-xs">
-                  <SelectValue placeholder="Select font" />
+                  <SelectValue placeholder="选择字体" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
@@ -154,7 +161,7 @@ export function LayoutControls() {
             </div>
 
             <div className="space-y-1">
-              <Label className="font-medium text-xs">Theme Mode</Label>
+              <Label className="font-medium text-xs">主题模式</Label>
               <ToggleGroup
                 size="sm"
                 spacing={0}
@@ -163,20 +170,14 @@ export function LayoutControls() {
                 value={themeMode}
                 onValueChange={onThemeModeChange}
               >
-                <ToggleGroupItem value="light" aria-label="Toggle light">
-                  Light
-                </ToggleGroupItem>
-                <ToggleGroupItem value="dark" aria-label="Toggle dark">
-                  Dark
-                </ToggleGroupItem>
-                <ToggleGroupItem value="system" aria-label="Toggle system">
-                  System
-                </ToggleGroupItem>
+                <ToggleGroupItem value="light">浅色</ToggleGroupItem>
+                <ToggleGroupItem value="dark">深色</ToggleGroupItem>
+                <ToggleGroupItem value="system">跟随系统</ToggleGroupItem>
               </ToggleGroup>
             </div>
 
             <div className="space-y-1">
-              <Label className="font-medium text-xs">Page Layout</Label>
+              <Label className="font-medium text-xs">页面布局</Label>
               <ToggleGroup
                 size="sm"
                 spacing={0}
@@ -185,17 +186,13 @@ export function LayoutControls() {
                 value={contentLayout}
                 onValueChange={onContentLayoutChange}
               >
-                <ToggleGroupItem value="centered" aria-label="Toggle centered">
-                  Centered
-                </ToggleGroupItem>
-                <ToggleGroupItem value="full-width" aria-label="Toggle full-width">
-                  Full Width
-                </ToggleGroupItem>
+                <ToggleGroupItem value="centered">居中</ToggleGroupItem>
+                <ToggleGroupItem value="full-width">全宽</ToggleGroupItem>
               </ToggleGroup>
             </div>
 
             <div className="space-y-1">
-              <Label className="font-medium text-xs">Navbar Behavior</Label>
+              <Label className="font-medium text-xs">顶部导航</Label>
               <ToggleGroup
                 size="sm"
                 spacing={0}
@@ -204,17 +201,13 @@ export function LayoutControls() {
                 value={navbarStyle}
                 onValueChange={onNavbarStyleChange}
               >
-                <ToggleGroupItem value="sticky" aria-label="Toggle sticky">
-                  Sticky
-                </ToggleGroupItem>
-                <ToggleGroupItem value="scroll" aria-label="Toggle scroll">
-                  Scroll
-                </ToggleGroupItem>
+                <ToggleGroupItem value="sticky">固定在顶部</ToggleGroupItem>
+                <ToggleGroupItem value="scroll">随页面滚动</ToggleGroupItem>
               </ToggleGroup>
             </div>
 
             <div className="space-y-1">
-              <Label className="font-medium text-xs">Sidebar Style</Label>
+              <Label className="font-medium text-xs">侧栏样式</Label>
               <ToggleGroup
                 size="sm"
                 spacing={0}
@@ -223,20 +216,14 @@ export function LayoutControls() {
                 value={variant}
                 onValueChange={onSidebarStyleChange}
               >
-                <ToggleGroupItem value="inset" aria-label="Toggle inset">
-                  Inset
-                </ToggleGroupItem>
-                <ToggleGroupItem value="sidebar" aria-label="Toggle sidebar">
-                  Sidebar
-                </ToggleGroupItem>
-                <ToggleGroupItem value="floating" aria-label="Toggle floating">
-                  Floating
-                </ToggleGroupItem>
+                <ToggleGroupItem value="inset">内嵌</ToggleGroupItem>
+                <ToggleGroupItem value="sidebar">标准</ToggleGroupItem>
+                <ToggleGroupItem value="floating">悬浮</ToggleGroupItem>
               </ToggleGroup>
             </div>
 
             <div className="space-y-1">
-              <Label className="font-medium text-xs">Sidebar Collapse Mode</Label>
+              <Label className="font-medium text-xs">侧栏收起方式</Label>
               <ToggleGroup
                 size="sm"
                 spacing={0}
@@ -245,17 +232,13 @@ export function LayoutControls() {
                 value={collapsible}
                 onValueChange={onSidebarCollapseModeChange}
               >
-                <ToggleGroupItem value="icon" aria-label="Toggle icon">
-                  Icon
-                </ToggleGroupItem>
-                <ToggleGroupItem value="offcanvas" aria-label="Toggle offcanvas">
-                  OffCanvas
-                </ToggleGroupItem>
+                <ToggleGroupItem value="icon">仅保留图标</ToggleGroupItem>
+                <ToggleGroupItem value="offcanvas">完全收起</ToggleGroupItem>
               </ToggleGroup>
             </div>
 
             <Button type="button" size="sm" variant="outline" className="w-full text-xs" onClick={handleRestore}>
-              Restore Defaults
+              恢复默认设置
             </Button>
           </div>
         </div>
