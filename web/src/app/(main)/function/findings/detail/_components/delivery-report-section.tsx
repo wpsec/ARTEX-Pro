@@ -2,43 +2,67 @@ import { CopyButton } from "@/components/copy-button";
 import { Markdown } from "@/components/markdown";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { applyCVSSMetadata } from "@/lib/delivery-report";
+import { prepareDeveloperDeliveryReport } from "@/lib/delivery-report";
 
 export function DeliveryReportSection({
   content,
+  name,
+  category,
+  summary,
+  findingId,
+  trafficCount,
   cvssVector,
+  reportEvidenceVersion,
+  currentEvidenceVersion,
   stale,
   hasDetailedReport,
 }: {
   content?: string;
+  name?: string;
+  category?: string;
+  summary?: string;
+  findingId?: string;
+  trafficCount?: number;
   cvssVector?: string;
+  reportEvidenceVersion?: number;
+  currentEvidenceVersion?: number;
   stale?: boolean;
   hasDetailedReport: boolean;
 }) {
-  const report = content ? applyCVSSMetadata(content, cvssVector ?? "") : "";
+  const burpPackageAvailable = (trafficCount ?? 0) > 0;
+  const { markdown: report, issues } = prepareDeveloperDeliveryReport(content ?? "", {
+    name,
+    category,
+    summary,
+    findingId,
+    cvssVector,
+    reportEvidenceVersion,
+    currentEvidenceVersion,
+    burpPackageAvailable,
+    hasDetailedReport,
+    stale,
+  });
+  const reviewNotice = issues.length ? `报告草稿：${issues.join("、")}。` : "";
+  const copyText = reviewNotice ? `> ${reviewNotice}\n\n${report}` : report;
 
   return (
     <Card>
       {report ? (
-        <CardHeader className="flex-row justify-end">
-          <CopyButton text={report} label="复制交付报告" successMessage="已复制交付报告" />
+        <CardHeader className="flex-row flex-wrap items-center justify-start gap-2">
+          <CopyButton
+            text={copyText}
+            label={reviewNotice ? "复制报告草稿" : "复制交付报告"}
+            successMessage={reviewNotice ? "已复制报告草稿" : "已复制交付报告"}
+          />
         </CardHeader>
       ) : null}
       <CardContent className="space-y-3">
-        {stale ? (
+        {report && reviewNotice ? (
           <Alert>
-            <AlertDescription>漏洞证据已变化，交付报告可能引用旧证据。</AlertDescription>
+            <AlertDescription>{reviewNotice}</AlertDescription>
           </Alert>
         ) : null}
-        {report ? (
-          <Markdown text={report} />
-        ) : (
-          <p className="text-muted-foreground text-sm">
-            {hasDetailedReport
-              ? "该详细报告生成时尚未包含交付报告；已有报告不会自动补写。"
-              : "交付报告会由报告 Agent 与详细报告一并生成。"}
-          </p>
-        )}
+        {report ? <Markdown text={report} /> : <p className="text-muted-foreground text-sm">交付报告尚未保存。</p>}
       </CardContent>
     </Card>
   );

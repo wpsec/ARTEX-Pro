@@ -402,7 +402,14 @@ function FindingDetailInner() {
         <TabsContent value="delivery-report" className="mt-0">
           <DeliveryReportSection
             content={finding.delivery_report}
+            name={finding.name}
+            category={finding.vulnclass}
+            summary={finding.summary}
+            findingId={finding.finding_id}
+            trafficCount={finding.traffic_count}
             cvssVector={finding.delivery_report_cvss_vector}
+            reportEvidenceVersion={finding.delivery_report_evidence_version}
+            currentEvidenceVersion={finding.delivery_report_current_evidence_version}
             stale={finding.delivery_report_stale}
             hasDetailedReport={Boolean(finding.report)}
           />

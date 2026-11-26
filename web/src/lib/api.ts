@@ -562,11 +562,11 @@ export const api = {
   // ---- exploration (per task) ----
   frontier: (task?: string) => get<TaskNode[]>(`/exploration/frontier${tq(task)}`).then(arr),
   findings: (task?: string) => get<Finding[]>(`/exploration/findings${tq(task)}`).then(arr),
-  findingsPage: (q: FindingQuery) => {
+  findingsPage: (q: FindingQuery, signal?: AbortSignal) => {
     const p = findingFilterParams(q);
     p.set("page", String(q.page));
     p.set("limit", String(q.pageSize));
-    return get<FindingsPage>(`/exploration/findings?${p.toString()}`);
+    return http<FindingsPage>(`/exploration/findings?${p.toString()}`, { signal });
   },
   findingGroups: (q: FindingQuery) => {
     const p = findingFilterParams(q);
@@ -616,6 +616,15 @@ export const api = {
     get<Finding>(
       `/exploration/findings/${id}${contextTaskId ? `?context_task=${encodeURIComponent(contextTaskId)}` : ""}`,
     ),
+  findingDeliveryReport: (taskId: string, findingId: string, signal?: AbortSignal) =>
+    http<{
+      exists: boolean;
+      has_detailed_report?: boolean;
+      content: string;
+      cvss_vector: string;
+      evidence_version: number;
+      current_evidence_version: number;
+    }>(`/tasks/${encodeURIComponent(taskId)}/findings/${encodeURIComponent(findingId)}/delivery-report`, { signal }),
   findingTraffic: (id: string, contextTask?: string) =>
     get<FindingTraffic>(
       `/exploration/findings/${id}/traffic${contextTask ? `?context_task=${encodeURIComponent(contextTask)}` : ""}`,
