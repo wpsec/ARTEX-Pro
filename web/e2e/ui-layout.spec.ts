@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 
 import { randomUUID } from "node:crypto";
 
+import { authCookieName } from "../src/lib/auth-cookie";
+
 const longSkillName = `regression-skill-${"long-name-".repeat(16)}`;
 const task = {
   id: "73",
@@ -20,7 +22,8 @@ const task = {
 test.beforeEach(async ({ context, page, baseURL }) => {
   if (!baseURL) throw new Error("Playwright baseURL is required");
   const token = randomUUID();
-  await context.addCookies([{ name: "artex_token", value: token, url: baseURL }]);
+  const name = authCookieName(new URL(baseURL).port);
+  await context.addCookies([{ name, value: token, url: baseURL }]);
   await context.addInitScript((value) => {
     localStorage.setItem("artex_token", value);
   }, token);

@@ -3,6 +3,8 @@ import { expect, test } from "@playwright/test";
 
 import { randomUUID } from "node:crypto";
 
+import { authCookieName } from "../src/lib/auth-cookie";
+
 async function authenticateAndMockAPI(
   context: BrowserContext,
   page: Page,
@@ -13,8 +15,7 @@ async function authenticateAndMockAPI(
 ) {
   if (!baseURL) throw new Error("Playwright baseURL is required");
   const token = randomUUID();
-  const { port } = new URL(baseURL);
-  const cookieName = port && port !== "80" && port !== "443" ? `artex_token_p${port}` : "artex_token";
+  const cookieName = authCookieName(new URL(baseURL).port);
 
   await context.addCookies([{ name: cookieName, value: token, url: baseURL }]);
   await context.addInitScript((value) => {
