@@ -758,6 +758,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/tasks/{id}/constraints/{cid}", s.editConstraint)    // 约束管理:修改约束
 	mux.HandleFunc("DELETE /api/tasks/{id}/constraints/{cid}", s.deleteConstraint) // 约束管理:删除约束
 	mux.HandleFunc("POST /api/tasks/{id}/control", s.control)
+	mux.HandleFunc("PUT /api/tasks/{id}/run-window", s.updateTaskRunWindow)
 	mux.HandleFunc("PUT /api/tasks/{id}/llm", s.updateTaskLLMProfiles)
 	mux.HandleFunc("GET /api/tasks/{id}/llm/resolution", s.taskLLMResolutionHandler)
 	mux.HandleFunc("POST /api/tasks/{id}/intents/{iid}/control", s.controlIntent)
@@ -847,6 +848,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/settings/web-search/test", s.testWebSearch)
 	mux.HandleFunc("GET /api/report", s.getReport)
 	mux.HandleFunc("GET /api/tasks/{id}/findings/{finding_id}/delivery-report", s.getFindingDeliveryReport)
+	mux.HandleFunc("GET /api/tasks/{id}/findings/{finding_id}/burp-package", s.downloadFindingBurpPackage)
 	mux.HandleFunc("PUT /api/tasks/{id}/findings/{finding_id}/delivery-report", s.saveFindingDeliveryReport)
 	mux.HandleFunc("POST /api/tasks/{id}/findings/{finding_id}/delivery-report/generate", s.generateFindingDeliveryReport)
 	mux.HandleFunc("GET /api/chat/mentions", s.searchChatMentions)
@@ -1167,7 +1169,7 @@ func (s *Server) control(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "action must be pause|resume")
 		return
 	}
-	result, err := s.applyTaskControl(t, req.Action)
+	result, err := s.applyTaskControlWithCause(t, req.Action, agent.AbortPausedByUser)
 	if err != nil {
 		writeErr(w, 409, err.Error())
 		return

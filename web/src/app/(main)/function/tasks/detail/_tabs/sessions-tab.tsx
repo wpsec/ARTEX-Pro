@@ -30,6 +30,7 @@ import { toast } from "sonner";
 import { ApprovalExecutionFocus, useApprovalFocus, useApprovalHistory } from "@/components/approval-execution-focus";
 import { MentionTextarea } from "@/components/mention-textarea";
 import { SideQuestionButton, SideQuestionWorkspace } from "@/components/side-question-workspace";
+import { useTaskRunWindowDialog } from "@/components/task-run-window";
 import { TodoPopover } from "@/components/todo-popover";
 import { Transcript } from "@/components/transcript";
 import {
@@ -63,6 +64,7 @@ import type {
   Session,
   SessionStatus,
   SessionTokenUsage,
+  Task,
   TaskLLMResolution,
   TaskLLMResolutions,
   TaskNode,
@@ -497,8 +499,9 @@ function WorkerAssetBadge({ assets }: { assets: IntentAsset[] }) {
   );
 }
 
-export function SessionsTab({ taskId }: { taskId: string }) {
+export function SessionsTab({ taskId, onTaskWindowSaved }: { taskId: string; onTaskWindowSaved: (task: Task) => void }) {
   const approvalFocus = useApprovalFocus({ taskId });
+  const windowDialog = useTaskRunWindowDialog(taskId, onTaskWindowSaved);
   const [selectedSessionId, setActiveId] = React.useState(MAIN_ID);
   const focusSession = React.useMemo<Session | undefined>(() => {
     const source = approvalFocus.state?.source;
@@ -1528,6 +1531,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
   function send() {
     const text = input.trim();
     const atts = attachments;
+    if (windowDialog.intercept(text, () => setInput(""))) return;
     if (side.handleCommand(text, () => setInput(""))) return;
     if ((!text && atts.length === 0) || sending || mainBusy) return;
     // No optimistic echo: the backend persists+broadcasts the human turn before it
@@ -1597,6 +1601,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
 
   return (
     <TooltipProvider delayDuration={300}>
+      {windowDialog.dialog}
       {/* 高度预留：页面头部（标题行 + 目标 + Tabs ≈ 7.5rem）+ 内容内边距。手机端 p-4、
         桌面端 lg:p-6，且桌面还要留出滚动余量，所以两档分别预留 10rem / 13rem —— 手机端
         沿用 13rem 会白白吃掉 3rem 的记录高度。 */}
@@ -2006,6 +2011,9 @@ export function SessionsTab({ taskId }: { taskId: string }) {
                     className="max-h-36 min-h-9 overflow-y-auto"
                   />
                   <InputGroupAddon align="block-end">
+                    <InputGroupButton size="xs" variant="ghost" onClick={windowDialog.open}>
+                      运行窗口
+                    </InputGroupButton>
                     <InputGroupButton
                       size="icon-xs"
                       variant="ghost"

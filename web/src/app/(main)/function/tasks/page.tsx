@@ -3364,7 +3364,7 @@ function CreateTaskSheet({
                 <>
                   <TaskRunWindowFields value={runWindow} onChange={setRunWindow} />
                   <FieldDescription>
-                    到停止时间自动暂停。
+                    新建任务会立即开始执行，到停止时间自动暂停。
                   </FieldDescription>
                 </>
               )}

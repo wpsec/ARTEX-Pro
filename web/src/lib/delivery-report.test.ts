@@ -561,3 +561,103 @@ test("keeps the recorded Python regression test reference and expected result", 
     assert.doesNotMatch(text, /fixture-script-marker/);
   }
 });
+
+test("renders the bound supporting request and builds its Python replay script", () => {
+  const report = formatDeveloperDeliveryReport(
+    [
+      "# 记录访问异常",
+      "## 漏洞描述",
+      "列表返回了其他账号的记录。",
+      "## 测试过程",
+      "测试角色：普通账号。",
+      "## 攻击链路",
+      "已观察到记录越权。",
+      "## 修复建议",
+      "服务端查询前校验记录归属。",
+      "<!-- artex:bound-traffic-evidence -->",
+      "### 平台留存的 HTTP 请求与响应",
+      "#### 证据绑定 23（辅助证据）",
+      "- 请求地址：https://audit.example.test/api/records?id=other",
+      "##### 请求包",
+      "```http",
+      "POST /api/records?id=other HTTP/1.1",
+      "Host: audit.example.test",
+      "Authorization: Bearer captured-fixture-token",
+      "Content-Type: application/json",
+      "Content-Length: 13",
+      "",
+      '{"id":"other"}',
+      "```",
+      "##### 响应包",
+      "~~~http",
+      "HTTP/1.1 200 OK",
+      "~~~",
+    ].join("\n"),
+  );
+
+  assert.match(report, /### 复现脚本（Python）/);
+  assert.match(
+    report,
+    /### Burp 复现包[\s\S]*```http\nPOST \/api\/records\?id=other HTTP\/1\.1\nHost: audit\.example\.test\nAuthorization: Bearer captured-fixture-token/,
+  );
+  assert.match(report, /默认直连；设置 `BURP_PROXY=http:\/\/127\.0\.0\.1:8080` 后经 Burp 发送。/);
+  assert.match(report, /TARGET_URL = "https:\/\/audit\.example\.test\/api\/records\?id=other"/);
+  assert.match(report, /METHOD = "POST"/);
+  assert.match(report, /"Authorization"[\s\S]*"Bearer captured-fixture-token"/);
+  assert.match(report, /BURP_PROXY=http:\/\/127\.0\.0\.1:8080 python3 replay\.py/);
+  assert.match(report, /connection\.set_tunnel\(target_host, target_port\)/);
+  assert.doesNotMatch(report, /captured-fixture-token.*\*/);
+});
+
+test("does not generate an executable replay script from baseline-only or incomplete traffic", () => {
+  const report = formatDeveloperDeliveryReport(
+    [
+      "# 记录访问异常",
+      "## 测试过程",
+      "普通账号无法读取其他账号的记录。",
+      "<!-- artex:bound-traffic-evidence -->",
+      "### 平台留存的 HTTP 请求与响应",
+      "#### 证据绑定 22（测试基线）",
+      "- 请求地址：https://audit.example.test/api/records",
+      "##### 请求包",
+      "~~~http",
+      "GET /api/records HTTP/1.1",
+      "Host: audit.example.test",
+      "~~~",
+    ].join("\n"),
+  );
+
+  assert.match(report, /本报告未附 Python 脚本。/);
+  assert.doesNotMatch(report, /BURP_PROXY|TARGET_URL =/);
+});
+
+test("renders a replay request and script for a header-only supporting request", () => {
+  const report = formatDeveloperDeliveryReport(
+    [
+      "# 记录访问异常",
+      "## 测试过程",
+      "普通账号读取到其他账号的记录。",
+      "<!-- artex:bound-traffic-evidence -->",
+      "### 平台留存的 HTTP 请求与响应",
+      "#### 证据绑定 24（辅助证据）",
+      "- 请求地址：https://audit.example.test/api/records/42",
+      "##### 请求包",
+      "```http",
+      "GET /api/records/42 HTTP/1.1",
+      "Host: audit.example.test",
+      "",
+      "",
+      "```",
+      "##### 响应包",
+      "```http",
+      "HTTP/1.1 200 OK",
+      "",
+      "",
+      "```",
+    ].join("\n"),
+  );
+
+  assert.match(report, /```http\nGET \/api\/records\/42 HTTP\/1\.1\nHost: audit\.example\.test/);
+  assert.match(report, /TARGET_URL = "https:\/\/audit\.example\.test\/api\/records\/42"/);
+  assert.match(report, /METHOD = "GET"/);
+});

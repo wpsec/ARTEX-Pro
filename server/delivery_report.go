@@ -438,7 +438,7 @@ func ensureDeliveryBurpSection(content, evidencePacket, evidenceTransport string
 	if synthetic {
 		section.WriteString("离线合成请求样例，不能直接发送到真实目标。\n")
 	}
-	section.WriteString("以下请求包供渗透测试工程师在授权目标中导入 Burp Repeater 复现或复测，不代表已通过 Burp 发送或验证。\n")
+	section.WriteString("以下请求包供渗透测试工程师在授权目标中导入 Burp Repeater 复现或复测，不代表已通过 Burp 发送或验证。认证信息按采集值保留；正文含二进制数据时以 Base64 留存，重放前须还原原始字节。\n")
 	if packet == "" {
 		packet = "<METHOD> <PATH> HTTP/1.1\r\nHost: <需从授权账号重新捕获>"
 		section.WriteString("原始请求未完整留存；此模板不能直接发送，缺失字段需从授权账号重新捕获。\n")
@@ -672,7 +672,6 @@ func deliveryBurpEvidenceRequest(packet string) string {
 		if requestStart >= 0 {
 			requestEnd := deliveryRawHTTPRequestEnd(lines, requestStart, end)
 			request := strings.TrimSpace(strings.Join(lines[requestStart:requestEnd], "\r\n"))
-			request = redactDeliveryPacket(request)
 			request = normalizeDeliveryRequestContentLength(request)
 			candidates = append(candidates, candidate{request: request, label: label, proof: proof})
 		}

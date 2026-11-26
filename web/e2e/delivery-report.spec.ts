@@ -401,6 +401,9 @@ test("finding detail previews and copies the same developer report", async ({ co
   await expect(page.getByText("列表通过相关接口返回了其他用户的记录。")).toBeVisible();
   await expect(page.getByText("触发位置：记录中心 → 我的记录，日常操作是打开记录列表。")).toBeVisible();
   await expect(page.getByText("预期只显示当前账号的记录。测试记录显示，列表里出现了其他账号的记录。")).toBeVisible();
+  await expect(page.getByText(/以下请求取自该漏洞绑定的流量证据/)).toBeVisible();
+  await expect(page.getByText(/GET \/api\/records\/42 HTTP\/1\.1\s+Host: app\.example/)).toBeVisible();
+  await expect(page.getByText(/TARGET_URL = "http:\/\/app\.example\/api\/records\/42"/)).toBeVisible();
   await expect(page.getByText(/src\/server\/records\.ts:42/)).toBeVisible();
   await expect(page.getByText("修复后验证", { exact: true })).toBeVisible();
   await expect(page.getByText("没有权限的用户应被拒绝。")).toBeVisible();
@@ -415,17 +418,22 @@ test("finding detail previews and copies the same developer report", async ({ co
   await expect(page.getByRole("button", { name: "生成草稿" })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Markdown 编辑" })).toHaveCount(0);
 
-  await expect(page.getByText("未附完整原始 HTTP 请求报文。", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "复制报告草稿" }).click();
+  await page.getByRole("button", { name: "复制交付报告" }).click();
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   expect(copied).toContain("CVSS 4.0：7.3（高危）");
   expect(copied).toContain("列表通过相关接口返回了其他用户的记录。");
   expect(copied).toContain("触发位置：记录中心 → 我的记录，日常操作是打开记录列表。");
   expect(copied).toContain(officialVectors[0].vector);
   expect(copied).toContain("预期只显示当前账号的记录。测试记录显示，列表里出现了其他账号的记录。");
+  expect(copied).toContain("以下请求取自该漏洞绑定的流量证据");
+  expect(copied).toContain("GET /api/records/42 HTTP/1.1");
+  expect(copied).toContain("Host: app.example");
+  expect(copied).toContain('TARGET_URL = "http://app.example/api/records/42"');
   expect(copied).toContain("src/server/records.ts:42");
   expect(copied).toContain("没有权限的用户应被拒绝。");
-  expect(copied).not.toMatch(/GET \/api\/records|Host:|TARGET_URL|```http|```python/);
+  expect(copied).toMatch(
+    /### Burp 复现包\n[\s\S]*```http\nGET \/api\/records\/42 HTTP\/1\.1[\s\S]*### 攻击链路\n[\s\S]*### 复现脚本（Python）\n[\s\S]*TARGET_URL = "http:\/\/app\.example\/api\/records\/42"[\s\S]*## 修复建议/,
+  );
   expect(copied).not.toMatch(/首轮上传腿|seq/);
   expect(copied).not.toContain("CVSS-B");
   expect(copied).not.toContain("漏洞等级");
@@ -434,13 +442,11 @@ test("finding detail previews and copies the same developer report", async ({ co
   reportStale = true;
   await page.reload();
   await page.getByRole("tab", { name: "交付报告" }).click();
-  await expect(
-    page.getByText("报告草稿：测试记录有更新，交付前请核对报告、缺少完整原始 HTTP 请求报文。"),
-  ).toBeVisible();
+  await expect(page.getByText("报告草稿：测试记录有更新，交付前请核对报告。")).toBeVisible();
   await page.getByRole("button", { name: "复制报告草稿" }).click();
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toMatch(/^> 报告草稿：测试记录有更新，交付前请核对报告、缺少完整原始 HTTP 请求报文。\n\n/);
+    .toMatch(/^> 报告草稿：测试记录有更新，交付前请核对报告。\n\n/);
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("页面加载时的附件证据版本：2。");
   await page.getByRole("tab", { name: "概览" }).click();
   await expect(page.getByText("详细报告原文保持不变。")).toBeVisible();

@@ -157,7 +157,7 @@ ARTEX_VERSION="$version" docker compose -f docker-compose.yml -f docker-compose.
 
 **并发**：每个任务的 work agent 数在「系统设置」里配置（默认 3）。
 
-新建任务时可设置每日停止时间。到点后，系统暂停仍在执行的任务。[任务运行窗口](docs/2026-11-26-任务运行窗口.md)
+任务可以设置每日运行时段，窗口结束后自动暂停，开放后由人工确认开始或继续。[任务运行窗口](docs/2026-11-26-任务运行窗口.md)
 
 **常用参数**：`./start.sh -addr :8787 -proxy :8788`（`-addr` 前端+API，`-proxy` 流量录制代理）。启动脚本会把参数原样透传给 `artex`。
 

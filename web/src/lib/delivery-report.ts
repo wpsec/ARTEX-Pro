@@ -67,6 +67,200 @@ const processInstruction =
   /^(?:第[一二三四五六七八九十\d]+步|步骤|先|然后|接着|再次|通过以下|向.+发送|发送|发起|请求(?!(?:已|未)?被拒绝)|调用|执行|运行(?!会话)|替换|构造|将.+(?:改|换)为|在.+(?:输入|运行(?!会话)|发送))|(?:按顺序|参数(?:设置|改为)|请求体|请求头)/;
 const packetOrCommandLine = /^(?:(?:host|content-type|content-length|user-agent|referer)\s*:|[{}]|\$\s)/i;
 
+type BoundHTTPRequest = {
+  url: string;
+  method: string;
+  headers: [string, string][];
+  body: string;
+  bodyBase64?: string;
+  packet: string;
+};
+
+function unescapeEvidenceMetadata(value: string) {
+  return value
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&#34;", '"')
+    .replaceAll("&#39;", "'")
+    .replaceAll("&amp;", "&")
+    .replaceAll("\\_", "_")
+    .replaceAll("\\[", "[")
+    .replaceAll("\\]", "]")
+    .replaceAll("\\*", "*")
+    .replaceAll("\\`", "`")
+    .replaceAll("\\{", "{")
+    .replaceAll("\\}", "}")
+    .replaceAll("\\<", "<")
+    .replaceAll("\\>", ">")
+    .replaceAll("\\|", "|")
+    .replaceAll("\\\\", "\\")
+    .replaceAll("\\r", "\r")
+    .replaceAll("\\n", "\n");
+}
+
+function parseBoundHTTPRequest(urlValue: string, packet: string): BoundHTTPRequest | undefined {
+  const urlText = unescapeEvidenceMetadata(urlValue.trim());
+  let url: URL;
+  try {
+    url = new URL(urlText);
+  } catch {
+    return undefined;
+  }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.hostname) return undefined;
+
+  const separator = packet.includes("\r\n\r\n") ? "\r\n\r\n" : "\n\n";
+  const separatorIndex = packet.indexOf(separator);
+  if (separatorIndex < 0) return undefined;
+  const headerText = packet.slice(0, separatorIndex);
+  const body = packet.slice(separatorIndex + separator.length);
+  const [requestLine, ...headerLines] = headerText.split(/\r?\n/);
+  const request = /^([A-Z]+)\s+\S+\s+HTTP\/\d(?:\.\d)?$/i.exec(requestLine ?? "");
+  if (!request) return undefined;
+
+  const headers: [string, string][] = [];
+  for (const line of headerLines) {
+    const match = /^([^:\s]+):[ \t]*(.*)$/.exec(line);
+    if (!match) return undefined;
+    headers.push([match[1], match[2]]);
+  }
+
+  const binaryBody =
+    /^\[二进制正文，原始长度 \d+ 字节；以下为原始字节的 Base64 编码\]\r?\n([A-Za-z0-9+/=\r\n]*)\s*$/.exec(body);
+  if (binaryBody) {
+    return {
+      url: urlText,
+      method: request[1].toUpperCase(),
+      headers,
+      body: "",
+      bodyBase64: binaryBody[1].replace(/\s/g, ""),
+      packet,
+    };
+  }
+  if (body === "[该方向的 HTTP 报文未留存]") return undefined;
+  return { url: urlText, method: request[1].toUpperCase(), headers, body, packet };
+}
+
+function boundHTTPRequestForReplay(content: string): BoundHTTPRequest | undefined {
+  const marker = "<!-- artex:bound-traffic-evidence -->";
+  const markerIndex = content.indexOf(marker);
+  if (markerIndex < 0) return undefined;
+  const appendix = content.slice(markerIndex + marker.length);
+  const bindingPattern = /(?:^|\n)#### 证据绑定 \d+（([^）]+)）\s*\r?\n/g;
+  const blocks: { role: string; text: string }[] = [];
+  const starts = [...appendix.matchAll(bindingPattern)];
+  for (const [index, match] of starts.entries()) {
+    const blockStart = (match.index ?? 0) + match[0].length;
+    const blockEnd = starts[index + 1]?.index ?? appendix.length;
+    blocks.push({ role: match[1], text: appendix.slice(blockStart, blockEnd) });
+  }
+
+  let fallback: BoundHTTPRequest | undefined;
+  for (const block of blocks) {
+    const urlMatch = /^- 请求地址：[ \t]*(.+)$/m.exec(block.text);
+    const requestHeading = block.text.indexOf("##### 请求包");
+    const responseHeading = block.text.indexOf("##### 响应包", requestHeading + 1);
+    const requestSection =
+      requestHeading >= 0 && responseHeading > requestHeading
+        ? block.text.slice(requestHeading + "##### 请求包".length, responseHeading)
+        : "";
+    if (!urlMatch || !requestSection) continue;
+    const packetMatch = /(?:^|\n)(`{3,})http[ \t]*\r?\n([\s\S]*?)\r?\n\1[ \t]*(?:\r?$|\n)/i.exec(requestSection);
+    if (!packetMatch) continue;
+    // The server adds the fence separator after the stored packet. Preserve the
+    // packet's terminating blank line so header-only requests remain parseable.
+    const packet = packetMatch[2];
+    const parsed = parseBoundHTTPRequest(urlMatch[1], packet);
+    if (!parsed || /测试基线/.test(block.role)) continue;
+    if (/漏洞验证|复核证据/.test(block.role)) return parsed;
+    fallback ??= parsed;
+  }
+  return fallback;
+}
+
+function pythonString(value: string) {
+  return JSON.stringify(value).replace(/[\u2028\u2029]/g, (char) => (char === "\u2028" ? "\\u2028" : "\\u2029"));
+}
+
+function renderPythonReplayScript(request: BoundHTTPRequest) {
+  const headers = JSON.stringify(request.headers, null, 4);
+  let body = "None";
+  if (request.bodyBase64) body = `base64.b64decode(${pythonString(request.bodyBase64)})`;
+  else if (request.body) body = `${pythonString(request.body)}.encode("utf-8")`;
+  return [
+    "# 默认直连；设置 BURP_PROXY 后才经 Burp 发送。",
+    "# 示例：BURP_PROXY=http://127.0.0.1:8080 python3 replay.py",
+    "# HTTPS 拦截时，可通过 BURP_CA_CERT 指向 Burp CA PEM 证书。",
+    "# 显式配置的代理不可用时会报错，不会回退直连。",
+    "import base64",
+    "import http.client",
+    "import os",
+    "import ssl",
+    "import sys",
+    "from urllib.parse import urlsplit",
+    "",
+    `TARGET_URL = ${pythonString(request.url)}`,
+    `METHOD = ${pythonString(request.method)}`,
+    `HEADERS = ${headers}`,
+    `BODY = ${body}`,
+    "",
+    "def main():",
+    "    target = urlsplit(TARGET_URL)",
+    "    target_host = target.hostname",
+    '    target_port = target.port or (443 if target.scheme == "https" else 80)',
+    '    target_path = target.path or "/"',
+    "    if target.query:",
+    '        target_path += "?" + target.query',
+    '    proxy_text = os.environ.get("BURP_PROXY", "").strip()',
+    "    proxy = None",
+    "    if proxy_text:",
+    '        proxy = urlsplit(proxy_text if "://" in proxy_text else "http://" + proxy_text)',
+    '        if proxy.scheme != "http" or not proxy.hostname:',
+    '            raise SystemExit("BURP_PROXY 须为 http:// 主机:端口")',
+    '    if target.scheme == "https":',
+    "        context = ssl.create_default_context()",
+    '        ca_file = os.environ.get("BURP_CA_CERT", "").strip()',
+    "        if ca_file:",
+    "            context.load_verify_locations(cafile=ca_file)",
+    "        if proxy:",
+    "            connection = http.client.HTTPSConnection(proxy.hostname, proxy.port or 8080, timeout=30, context=context)",
+    "            connection.set_tunnel(target_host, target_port)",
+    "        else:",
+    "            connection = http.client.HTTPSConnection(target_host, target_port, timeout=30, context=context)",
+    '    elif target.scheme == "http":',
+    "        connection = http.client.HTTPConnection(proxy.hostname, proxy.port or 8080, timeout=30) if proxy else http.client.HTTPConnection(target_host, target_port, timeout=30)",
+    "        if proxy:",
+    '            target_path = target.scheme + "://" + target.netloc + target_path',
+    "    else:",
+    '        raise SystemExit("仅支持 HTTP/HTTPS 证据")',
+    "",
+    '    captured_host = any(name.lower() == "host" for name, _ in HEADERS)',
+    "    connection.putrequest(METHOD, target_path, skip_host=captured_host, skip_accept_encoding=True)",
+    "    had_content_length = False",
+    "    for name, value in HEADERS:",
+    "        lowered = name.lower()",
+    '        if lowered == "transfer-encoding":',
+    "            continue",
+    '        if lowered == "content-length":',
+    "            had_content_length = True",
+    "            continue",
+    "        connection.putheader(name, value)",
+    "    if BODY is not None:",
+    '        connection.putheader("Content-Length", str(len(BODY)))',
+    "    elif had_content_length:",
+    '        connection.putheader("Content-Length", "0")',
+    "    connection.endheaders(BODY)",
+    "    response = connection.getresponse()",
+    '    print(f"HTTP {response.status} {response.reason}")',
+    "    for name, value in response.getheaders():",
+    '        print(f"{name}: {value}")',
+    '    sys.stdout.buffer.write(b"\\n" + response.read())',
+    "    connection.close()",
+    "",
+    'if __name__ == "__main__":',
+    "    main()",
+  ].join("\n");
+}
+
 const inlineValue = /`[^\s`]*[:=/][^`]*`|\b[a-f0-9]{24,}\b/i;
 const quotedEndpoint = /[ \t]*`(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)\s+\/[^\s`]+`[ \t]*/gi;
 const quotedPath = /[ \t]*`\/(?!\/)[^\s`]+`[ \t]*/g;
@@ -407,8 +601,17 @@ export function prepareDeveloperDeliveryReport(
     Boolean(remediationFields),
   ).filter((sentence) => !remediation.includes(sentence));
   const ref = /^\d+$/.test(findingId) ? `（漏洞 #${findingId}）` : "";
+  const replayRequest = boundHTTPRequestForReplay(content);
   let reproduction = "原报告未注明复现记录。";
-  if (burpPackageAvailable) {
+  if (replayRequest) {
+    reproduction = [
+      "以下请求取自该漏洞绑定的流量证据，可复制到 Burp Suite Repeater 复现或复测。请求包本身不代表已发送或已验证。",
+      ...(replayRequest.bodyBase64
+        ? ["请求正文为二进制内容，以下以 Base64 留存。导入 Repeater 前须还原原始字节。"]
+        : []),
+      `\`\`\`http\n${replayRequest.packet}\n\`\`\``,
+    ].join("\n\n");
+  } else if (burpPackageAvailable) {
     reproduction = "未附完整原始 HTTP 请求报文。";
   } else if (httpRecorded) {
     reproduction = `未附完整原始 HTTP 请求报文，请在漏洞详情中核对${ref}。`;
@@ -455,7 +658,12 @@ export function prepareDeveloperDeliveryReport(
     ...[...new Set(pythonLocations)].map((location) => `用例位置：\`${location}\``),
     ...(pythonLocations.length ? [`预期结果：${paragraph(pythonExpected, "原报告未记录。")}`] : []),
   ];
-  if (!pythonLocations.length) {
+  if (replayRequest) {
+    python.push(
+      "脚本按绑定的漏洞验证或复核请求生成，采集到的认证信息和请求正文保持原值。默认直连；设置 `BURP_PROXY=http://127.0.0.1:8080` 后经 Burp 发送。显式代理不可用时会报错且不会回退直连；HTTPS 可设置 `BURP_CA_CERT` 信任 Burp CA。",
+      `\`\`\`python\n${renderPythonReplayScript(replayRequest)}\n\`\`\``,
+    );
+  } else if (!pythonLocations.length) {
     python.push(
       acceptance.length
         ? `本报告未附 Python 脚本。复测预期见「${repairVerificationTitle}」。`
@@ -474,8 +682,9 @@ export function prepareDeveloperDeliveryReport(
   } else if (reportEvidenceVersion !== currentEvidenceVersion) {
     issues.push("测试记录有更新，交付前请核对报告");
   }
-  if (burpPackageAvailable || httpRecorded || httpExample) {
-    issues.push("缺少完整原始 HTTP 请求报文");
+  if (burpPackageAvailable || replayRequest || httpRecorded || httpExample) {
+    if (!replayRequest) issues.push("缺少完整原始 HTTP 请求报文");
+    if (replayRequest?.bodyBase64) issues.push("留存请求正文为二进制，无法直接复制使用");
     if (!recordedVerification || recordedVerification.endsWith("待核对。")) issues.push("Burp 验证状态待核对");
   } else if (!nonHTTP) {
     issues.push("缺少 HTTP 证据或 Burp 不适用说明");

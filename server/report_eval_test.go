@@ -547,7 +547,7 @@ func TestDeliveryReportDraftKeepsRatingRationaleInDescriptionAndSanitizesSynthet
 	}
 }
 
-func TestDeliveryReportDraftRestoresBurpSectionAndRedactsEvidencePacket(t *testing.T) {
+func TestDeliveryReportDraftRestoresBurpSectionAndKeepsEvidencePacketUnredacted(t *testing.T) {
 	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N"
 	message, err := json.Marshal(deliveryReportDraft{
 		CVSSVector:  vector,
@@ -582,8 +582,8 @@ func TestDeliveryReportDraftRestoresBurpSectionAndRedactsEvidencePacket(t *testi
 	if strings.Contains(burpSection, "Burp 不适用") {
 		t.Fatalf("HTTP report was incorrectly marked not applicable: %s", burpSection)
 	}
-	if strings.Contains(burpSection, "session-secret") || strings.Contains(burpSection, "cookie-secret") || strings.Contains(burpSection, `"secret"`) {
-		t.Fatalf("sensitive values leaked into the Burp request packet: %s", burpSection)
+	if !strings.Contains(burpSection, "session-secret") || !strings.Contains(burpSection, "cookie-secret") || !strings.Contains(burpSection, `"secret"`) {
+		t.Fatalf("captured authentication or body values were not retained in the Burp request packet: %s", burpSection)
 	}
 }
 
@@ -709,8 +709,8 @@ func TestDeliveryBurpEvidenceRequestKeepsEvalPacketsSeparate(t *testing.T) {
 	if strings.Contains(got, "GET /api/jobs/job-a HTTP/1.1") || strings.Contains(got, "### 修改后查询") {
 		t.Fatalf("extracted request contains neighboring evidence: %q", got)
 	}
-	if strings.Contains(got, `"secret"`) || !strings.Contains(got, `"token":"[REDACTED]"`) {
-		t.Fatalf("extracted request was not redacted: %q", got)
+	if !strings.Contains(got, `"secret"`) || strings.Contains(got, "[REDACTED]") {
+		t.Fatalf("extracted request did not preserve the captured body: %q", got)
 	}
 }
 

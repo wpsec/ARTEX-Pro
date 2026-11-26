@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -180,6 +181,54 @@ func TestTaskRunWindowGuardPausesExpiredTaskAndCancelsInFlight(t *testing.T) {
 	s.fillWindowDrainState(&dto, task)
 	if dto.RunWindowStatus != "closed" {
 		t.Fatalf("drained task status = %s, want closed", dto.RunWindowStatus)
+	}
+}
+
+func TestTaskRunWindowHTTPDoesNotApplyStaleEdit(t *testing.T) {
+	if _, _, err := db.DSN(); err != nil {
+		t.Skip("requires a PostgreSQL fixture")
+	}
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	task, err := m.CreateTask("window edit fixture", "verify edition conflicts", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = m.DeleteTask(task.ID, DeleteTaskOptions{}) }()
+	s := newAdmissionTestServer(m, nil)
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	token, err := signJWT(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.jwtKey = key
+	handler := s.Handler()
+	edit := func(payload string, authorized bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/api/tasks/"+task.ID+"/run-window", strings.NewReader(payload))
+		if authorized {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w
+	}
+	if response := edit(`{"revision":0,"window":null}`, false); response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated write: %d %s", response.Code, response.Body)
+	}
+	if response := edit(`{"revision":0,"window":{"end":"08:00","time_zone":"UTC"}}`, true); response.Code != http.StatusOK {
+		t.Fatalf("set window: %d %s", response.Code, response.Body)
+	}
+	if response := edit(`{"revision":0,"window":null}`, true); response.Code != http.StatusConflict {
+		t.Fatalf("stale edit: %d %s", response.Code, response.Body)
+	}
+	if window := task.windowSnapshot(); window.revision != 1 || window.policy == nil || task.lifecycleSnapshot().Paused {
+		t.Fatalf("stale edit changed runtime: %+v", window)
 	}
 }
 

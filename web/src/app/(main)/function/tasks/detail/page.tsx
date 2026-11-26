@@ -286,6 +286,29 @@ function TaskDetailInner() {
     return () => clearInterval(timer);
   }, [load]);
 
+  function applySavedRunWindow(updated: Task) {
+    if (updated.id !== id) return;
+    setTask((current) =>
+      current?.id === updated.id
+        ? {
+            ...current,
+            status: updated.status,
+            paused: updated.paused,
+            queued: updated.queued,
+            run_window: updated.run_window,
+            run_window_revision: updated.run_window_revision,
+            run_window_status: updated.run_window_status,
+            run_window_next_at: updated.run_window_next_at,
+            deadline_at: updated.deadline_at,
+          }
+        : current,
+    );
+    setPaused(updated.paused ?? false);
+    // An earlier poll may still carry the old window revision.
+    taskLoadInFlight.current = null;
+    load();
+  }
+
   async function togglePause() {
     if (task && ["done", "failed", "timeout"].includes(task.status)) return;
     const next = !paused;
@@ -439,7 +462,7 @@ function TaskDetailInner() {
       {/* Tab content */}
       <div className="flex-1 p-4 lg:p-6">
         <TabsContent value="sessions" className="mt-0">
-          <SessionsTab taskId={id} />
+          <SessionsTab taskId={id} onTaskWindowSaved={applySavedRunWindow} />
         </TabsContent>
         <TabsContent value="overview" className="mt-0">
           <OverviewTab taskId={id} />
