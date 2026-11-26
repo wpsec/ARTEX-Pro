@@ -32,7 +32,7 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 	reportGuidance := ""
 	for i, tool := range tools {
 		if tool.Name() == "update_finding_report" {
-			reportGuidance = DeliveryReportRuntimeGuidance + DeliveryReportChainGuidance + DeliveryReportEvidenceGuidance + DeliveryReportStyleGuidance
+			reportGuidance = DeliveryReportRuntimeGuidance + DeliveryReportChainGuidance + DeliveryReportEvidenceGuidance + DeliveryReportStyleGuidance + deliveryReportFieldContinuationGuidance
 			if !strings.Contains(tool.Description(), DeliveryReportSaveGuidance) {
 				tools[i] = DecorateTool(tool, tool.Description()+"\n"+DeliveryReportSaveGuidance, tool.InputSchema())
 			}

@@ -235,6 +235,26 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 	if !reporterPromptHashNeedsTemplateUpgrade(previousV36Hash) {
 		t.Fatal("previous v36 stock prompt would retain the old delivery report structure")
 	}
+	for _, previous := range []string{
+		"36b7edff884c1873973f4c07d1ad878dd4114934c29ba2c46f5a9297f2d9563a",
+		"b7b3da341c0f231f1464a68611963ea7de25a722fc20c2d4fc2c42d6502bad4a",
+	} {
+		if !reporterPromptHashNeedsTemplateUpgrade(previous) {
+			t.Fatal("previous v37 stock prompt would keep writing test chronology into the delivery report")
+		}
+	}
+	if !reporterPromptHashNeedsTemplateUpgrade("b1810d42660faea41acceac39b21c3fb7def52ddc34d0bcb2d792dec7e507d93") {
+		t.Fatal("previous v38 stock prompt would miss the location guidance")
+	}
+	if !reporterPromptHashNeedsTemplateUpgrade("cd554551fda6c64b19cc7b90394bd7cf1bfcb9baa185b5ffbb3ab2a8a2495ac6") {
+		t.Fatal("previous v39 stock prompt would miss the business chain and remediation guidance")
+	}
+	if !reporterPromptHashNeedsTemplateUpgrade("aafa25ea714783911df067197419e08a32e09ddb0d501d23c52d3e1a94722056") {
+		t.Fatal("previous v40 stock prompt would use unstructured test prose")
+	}
+	if !reporterPromptHashNeedsTemplateUpgrade("fdbf9634694918660cd5bedb01707ebd1496b896c71843cbd4a5d2619023a05f") {
+		t.Fatal("previous v41 stock prompt would use unstructured description and remediation")
+	}
 	if reporterPromptNeedsTemplateUpgrade(agent.ReporterDefaultPrompt) {
 		t.Fatal("current stock prompt should not be migrated")
 	}

@@ -190,14 +190,28 @@ func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 		"回读查询放在并发组之后",
 		"多条请求不等于并发",
 		"正文以 800 字为参考预算",
-		"第一行写测试时间，随后按时间顺序简述测试操作、实际结果、失败尝试和未验证边界",
+		"第一行写测试时间，随后逐行使用上述业务字段",
 		"每项事实只展开一次",
 		"正文写给开发看",
 		"不要把交付报告的精简要求套到详细报告",
 		"保存前在本次输出中核对结论、限制、修复和链路",
-		"Burp 复现只说明请求包供工程师在授权目标中导入 Burp 使用，并附最小请求包",
 		"攻击链不超过 230 字",
-		"每项事实只展开一次",
+		"相同结果的重复验证合并说明",
+		"把字节数、逐字节比较、内部序号、脚本阶段名称和具体文件属主留在测试台账",
+		"黑盒测试按功能和外部表现定位",
+		"在链路树中用“入口：”“校验缺口：”“实际影响：”标明对应的业务节点",
+		"缺陷行为已确认时，即使没有源码，也要写清应在什么业务环节应用哪条规则",
+		"涉及多个环节的同一授权规则应覆盖所有已确认的环节",
+		"<!-- artex:developer-test-facts-v1 -->",
+		"<!-- artex:developer-report-fields-v1 -->",
+		"描述按行写“漏洞现象：”“已确认影响：”“触发位置：”",
+		"修复建议按行写“修复措施：”和“修复后验收：”",
+		"材料无法确认某种影响时，在未验证范围直接说清无法确认什么",
+		"用功能的业务名称开头",
+		"写实际页面、菜单或按钮，以及对应的正常业务动作",
+		"写接口所属模块、业务用途和浏览器入口的核实状态",
+		"只有记录确认没有前台入口时，才称为隐藏接口",
+		"把评分向量放在报告头",
 		"业务约定和已观察结果可以定义修复目标，但不能反推出当前代码的具体实现缺陷",
 		"建议中只能出现一项措施",
 	} {
@@ -209,6 +223,15 @@ func TestDeliveryReportKeepsExecutionLedgerOutOfDeliveryBody(t *testing.T) {
 		if strings.Contains(DeliveryReportWritingRules, absent) {
 			t.Fatalf("delivery report guidance retains a style blacklist or hard limit: %q", absent)
 		}
+	}
+	if !strings.Contains(DeliveryReportDraftRules, "简述测试角色、预期行为和实际结果") {
+		t.Fatal("JSON drafts must lead with what the developer needs to compare")
+	}
+	if !strings.Contains(DeliveryReportDraftRules, "描述最后另起一行写“触发位置：…”") {
+		t.Fatal("JSON drafts must include the same location guidance as Markdown reports")
+	}
+	if !strings.Contains(DeliveryReportDraftRules, "<!-- artex:developer-test-facts-v1 -->") {
+		t.Fatal("JSON drafts must include the same verified test fields as Markdown reports")
 	}
 	if strings.Contains(DeliveryReportWritingRules, "JSON 的 description 字段") || !strings.Contains(DeliveryReportDraftRules, "description 用短句写问题") ||
 		!strings.Contains(DeliveryReportDraftRules, "cvss_vector 优先使用输入提供的有效向量") ||
