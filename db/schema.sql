@@ -554,6 +554,18 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS queued BOOLEAN NOT NULL DEFAULT false
 -- 给 agent 开放 add_task_scope/list_untested_assets;false=全部关闭(见 task_scope.go)。
 -- 存量任务默认 true 保持原行为;company 关联(task_scope kind=company)不受此开关影响。
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS coverage_enabled BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS run_window JSONB;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS run_window_revision BIGINT NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS task_run_window_audit (
+    task_id BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    revision BIGINT NOT NULL,
+    actor TEXT NOT NULL,
+    previous_window JSONB,
+    next_window JSONB,
+    effective_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY(task_id, revision)
+);
 -- queued_at makes admission FIFO reflect the actual enqueue order rather than the
 -- task creation order. queue_mode distinguishes first bootstrap from resuming an
 -- exploration that already owns goals/history.
