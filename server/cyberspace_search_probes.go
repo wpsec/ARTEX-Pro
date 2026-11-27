@@ -18,10 +18,11 @@ type cyberspaceProvider struct {
 	endpoint, method     string
 	header, queryKey     string
 	accountID            bool
+	email                bool
 }
 
 var cyberspaceProviders = []cyberspaceProvider{
-	{id: "fofa", name: "FOFA", credential: "API Key", endpoint: "https://fofa.info/api/v1/info/my", queryKey: "key"},
+	{id: "fofa", name: "FOFA", credential: "API Key", endpoint: "https://fofa.info/api/v1/info/my", queryKey: "key", email: true},
 	{id: "hunter_qax", name: "奇安信鹰图", credential: "API Key"},
 	{id: "hunter_how", name: "hunter.how", credential: "API Key"},
 	{id: "shodan", name: "Shodan", credential: "API Key", endpoint: "https://api.shodan.io/api-info", queryKey: "key"},
@@ -73,6 +74,9 @@ func probeCyberspaceProvider(ctx context.Context, client *http.Client, provider 
 	if provider.queryKey != "" {
 		query := req.URL.Query()
 		query.Set(provider.queryKey, key)
+		if provider.email && account != "" {
+			query.Set("email", account)
+		}
 		req.URL.RawQuery = query.Encode()
 	}
 	if provider.header != "" {

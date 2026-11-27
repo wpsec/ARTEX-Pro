@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/mail"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -47,8 +48,10 @@ type cyberspaceProviderDTO struct {
 	Name           string          `json:"name"`
 	Credential     string          `json:"credential"`
 	NeedsAccountID bool            `json:"needs_account_id"`
+	SupportsEmail  bool            `json:"supports_email"`
 	Configured     bool            `json:"configured"`
 	AccountIDSet   bool            `json:"account_id_set"`
+	EmailSet       bool            `json:"email_set"`
 	Enabled        bool            `json:"enabled"`
 	Revision       uint64          `json:"revision"`
 	Test           *cyberspaceTest `json:"test,omitempty"`
@@ -59,6 +62,7 @@ type cyberspaceConfigUpdate struct {
 	Enabled   bool    `json:"enabled"`
 	APIKey    string  `json:"api_key"`
 	AccountID string  `json:"account_id"`
+	Email     *string `json:"email"`
 	Clear     bool    `json:"clear"`
 }
 
@@ -72,8 +76,9 @@ func newCyberspaceSearch(pg *db.DB, dataDir string) *cyberspaceSearch {
 
 func (p cyberspaceProvider) dto(config cyberspaceConfig) cyberspaceProviderDTO {
 	return cyberspaceProviderDTO{
-		ID: p.id, Name: p.name, Credential: p.credential, NeedsAccountID: p.accountID,
-		Configured: config.Key != "", AccountIDSet: config.Account != "", Enabled: config.Enabled,
+		ID: p.id, Name: p.name, Credential: p.credential, NeedsAccountID: p.accountID, SupportsEmail: p.email,
+		Configured: config.Key != "", AccountIDSet: p.accountID && config.Account != "",
+		EmailSet: p.email && config.Account != "", Enabled: config.Enabled,
 		Revision: config.Revision, Test: config.Test,
 	}
 }
@@ -154,7 +159,15 @@ func (s *Server) saveCyberspaceSearch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "用户 ID 格式无效，请填写账户标识")
 		return
 	}
-	if req.Clear && (req.APIKey != "" || req.AccountID != "") {
+	if req.Email != nil {
+		email := strings.TrimSpace(*req.Email)
+		if !p.email || (email != "" && !validCyberspaceEmail(email)) {
+			writeErr(w, http.StatusBadRequest, "此搜索引擎不支持邮箱或邮箱格式无效")
+			return
+		}
+		req.Email = &email
+	}
+	if req.Clear && (req.APIKey != "" || req.AccountID != "" || req.Email != nil) {
 		writeErr(w, http.StatusBadRequest, "请分别执行清除或替换操作")
 		return
 	}
@@ -192,14 +205,26 @@ func (s *Server) saveCyberspaceSearch(w http.ResponseWriter, r *http.Request) {
 	writeErr(w, http.StatusConflict, "配置已变化，请刷新后重试")
 }
 
+func validCyberspaceEmail(email string) bool {
+	addr, err := mail.ParseAddress(email)
+	return len(email) <= 254 && err == nil && addr.Name == "" && addr.Address == email
+}
+
 func (c *cyberspaceSearch) updatedConfig(id string, config cyberspaceConfig, req cyberspaceConfigUpdate) (cyberspaceConfig, error) {
-	if config.Enabled == req.Enabled && !req.Clear && req.APIKey == "" && req.AccountID == "" {
+	if config.Enabled == req.Enabled && !req.Clear && req.APIKey == "" && req.AccountID == "" && req.Email == nil {
 		return config, nil
 	}
 	if req.Clear {
 		config.Key, config.Account = "", ""
 	}
-	if req.APIKey != "" || req.AccountID != "" {
+	account := req.AccountID
+	if req.Email != nil {
+		account = *req.Email
+		if account == "" {
+			config.Account = ""
+		}
+	}
+	if req.APIKey != "" || account != "" {
 		aead, err := loadCyberspaceCipher(c.keyPath, config.Key == "" && config.Account == "")
 		if err != nil {
 			return config, err
@@ -207,8 +232,8 @@ func (c *cyberspaceSearch) updatedConfig(id string, config cyberspaceConfig, req
 		if req.APIKey != "" {
 			config.Key = sealCyberspaceValue(aead, id+"/key", req.APIKey)
 		}
-		if req.AccountID != "" {
-			config.Account = sealCyberspaceValue(aead, id+"/account", req.AccountID)
+		if account != "" {
+			config.Account = sealCyberspaceValue(aead, id+"/account", account)
 		}
 	}
 	config.Enabled = req.Enabled

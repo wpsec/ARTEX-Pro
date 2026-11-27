@@ -935,8 +935,10 @@ export interface CyberspaceSearchProvider {
   name: string;
   credential: string;
   needs_account_id: boolean;
+  supports_email: boolean;
   configured: boolean;
   account_id_set: boolean;
+  email_set: boolean;
   enabled: boolean;
   revision: number;
   test?: {
@@ -951,6 +953,7 @@ export interface CyberspaceSearchConfig {
   enabled: boolean;
   api_key?: string;
   account_id?: string;
+  email?: string;
   clear?: boolean;
 }
 

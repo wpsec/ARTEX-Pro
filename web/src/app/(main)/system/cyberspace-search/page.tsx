@@ -87,6 +87,8 @@ function ProviderEditor({
   const [enabled, setEnabled] = useState(provider.enabled);
   const [key, setKey] = useState("");
   const [account, setAccount] = useState("");
+  const [email, setEmail] = useState("");
+  const [removeEmail, setRemoveEmail] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -97,10 +99,17 @@ function ProviderEditor({
       const updated = await api.saveCyberspaceSearchProvider(provider.id, {
         revision: provider.revision,
         enabled,
-        ...(clear ? { clear: true } : { api_key: key.trim() || undefined, account_id: account.trim() || undefined }),
+        ...(clear
+          ? { clear: true }
+          : {
+              api_key: key.trim() || undefined,
+              account_id: account.trim() || undefined,
+              email: removeEmail ? "" : email.trim() || undefined,
+            }),
       });
       setKey("");
       setAccount("");
+      setEmail("");
       onSaved(updated);
       toast.success(clear ? "已清除凭据" : "已保存搜索引擎配置");
     } catch (err) {
@@ -141,9 +150,43 @@ function ProviderEditor({
               placeholder={provider.configured ? "已配置，填写新值可替换" : "输入凭据"}
             />
           </div>
+          {provider.supports_email && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="cyberspace-email">注册邮箱（旧版选填）</Label>
+                {provider.email_set && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={saving}
+                    onClick={() => {
+                      setRemoveEmail(!removeEmail);
+                      setEmail("");
+                    }}
+                  >
+                    {removeEmail ? "保留邮箱" : "清除邮箱"}
+                  </Button>
+                )}
+              </div>
+              <Input
+                id="cyberspace-email"
+                type="email"
+                autoComplete="off"
+                maxLength={254}
+                disabled={saving || removeEmail}
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder={provider.email_set ? "已配置，填写新值可替换" : "填写 FOFA 注册邮箱"}
+              />
+              <p className="text-muted-foreground text-xs">
+                {removeEmail ? "保存后将仅使用 API Key。" : "当前版只需 API Key。旧版要求邮箱时再填写。"}
+              </p>
+            </div>
+          )}
           {provider.needs_account_id && (
             <div className="space-y-2">
-              <Label htmlFor="cyberspace-account">用户 ID</Label>
+              <Label htmlFor="cyberspace-account">用户 ID（连接测试选填）</Label>
               <Input
                 id="cyberspace-account"
                 type="password"
@@ -164,7 +207,7 @@ function ProviderEditor({
           )}
           <div className="flex items-center justify-between gap-2">
             <div>
-              {(provider.configured || provider.account_id_set) && (
+              {(provider.configured || provider.account_id_set || provider.email_set) && (
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button type="button" variant="outline" className="text-destructive" disabled={saving}>

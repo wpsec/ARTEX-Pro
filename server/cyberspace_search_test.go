@@ -156,6 +156,60 @@ func TestCyberspaceConfigKeepsSecretsWriteOnly(t *testing.T) {
 	}
 }
 
+func TestCyberspaceLegacyFOFAEmail(t *testing.T) {
+	provider, _ := cyberspaceProviderByID("fofa")
+	for _, p := range cyberspaceProviders {
+		dto := p.dto(cyberspaceConfig{})
+		if dto.SupportsEmail != (p.id == "fofa") || dto.NeedsAccountID != (p.id == "virustotal") {
+			t.Fatalf("incorrect credential fields for %s", p.id)
+		}
+	}
+	c := newCyberspaceSearch(nil, t.TempDir())
+	legacyEmail := "synthetic-account@example.invalid"
+	if !validCyberspaceEmail(legacyEmail) || validCyberspaceEmail("synthetic-name") ||
+		validCyberspaceEmail("Test <"+legacyEmail+">") {
+		t.Fatal("email validation did not distinguish a bare address")
+	}
+	saved, err := c.updatedConfig(provider.id, cyberspaceConfig{}, cyberspaceConfigUpdate{
+		Enabled: true, APIKey: "synthetic-fixture", Email: &legacyEmail,
+	})
+	if err != nil || saved.Account == "" || strings.Contains(saved.Account, legacyEmail) {
+		t.Fatal("FOFA email was not encrypted")
+	}
+	dto := provider.dto(saved)
+	if !dto.Configured || !dto.EmailSet || dto.AccountIDSet {
+		t.Fatal("FOFA configuration metadata is inconsistent")
+	}
+	body, err := json.Marshal(dto)
+	if err != nil || strings.Contains(string(body), legacyEmail) || strings.Contains(string(body), saved.Account) {
+		t.Fatal("FOFA email leaked into the configuration response")
+	}
+	key, email, err := c.openCredentials(provider.id, saved)
+	if err != nil || email != legacyEmail {
+		t.Fatal("FOFA email could not be restored")
+	}
+	c.client.Transport = cyberspaceRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		query := req.URL.Query()
+		if req.URL.Host != "fofa.info" || query.Get("email") != legacyEmail || query.Get("key") != key || len(query) != 2 {
+			t.Fatal("FOFA account check did not use its configured legacy credential pair")
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"error":false,"isvip":false}`))}, nil
+	})
+	if status, _ := probeCyberspaceProvider(t.Context(), c.client, provider, key, email); status != "passed" {
+		t.Fatalf("legacy FOFA account check status=%s", status)
+	}
+	saved.Test = &cyberspaceTest{Status: "passed"}
+	retained, err := c.updatedConfig(provider.id, saved, cyberspaceConfigUpdate{Enabled: true})
+	if err != nil || retained.Account != saved.Account || retained.Revision != saved.Revision {
+		t.Fatal("omitting the email should preserve it")
+	}
+	clearEmail := ""
+	cleared, err := c.updatedConfig(provider.id, saved, cyberspaceConfigUpdate{Enabled: true, Email: &clearEmail})
+	if err != nil || cleared.Account != "" || cleared.Key != saved.Key || cleared.Test != nil || cleared.Revision != saved.Revision+1 {
+		t.Fatal("clearing the email should preserve the key and invalidate the test")
+	}
+}
+
 func TestCyberspaceRoutesRequireAuthentication(t *testing.T) {
 	handler := (&Server{m: &Manager{}}).Handler()
 	for _, route := range []struct{ method, path string }{
@@ -231,6 +285,9 @@ func TestCyberspacePostgresBatchAndRotation(t *testing.T) {
 		w := httptest.NewRecorder()
 		s.saveCyberspaceSearch(w, r)
 		return w
+	}
+	if w := save("shodan", `{"revision":0,"enabled":true,"email":"fixture@example.invalid"}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected field for Shodan accepted with status=%d", w.Code)
 	}
 	for _, id := range ids {
 		w := save(id, `{"revision":0,"enabled":true,"api_key":"synthetic-old"}`)
