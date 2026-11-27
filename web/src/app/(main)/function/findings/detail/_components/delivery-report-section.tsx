@@ -62,7 +62,11 @@ export function DeliveryReportSection({
             <AlertDescription>{reviewNotice}</AlertDescription>
           </Alert>
         ) : null}
-        {report ? <Markdown text={report} /> : <p className="text-muted-foreground text-sm">交付报告尚未保存。</p>}
+        {report ? (
+          <Markdown text={report} copyReproductionBlocks />
+        ) : (
+          <p className="text-muted-foreground text-sm">交付报告尚未保存。</p>
+        )}
       </CardContent>
     </Card>
   );
