@@ -3779,7 +3779,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	window := t.windowSnapshot()
 	if !window.allowed(time.Now()) {
 		s.chatMu.Unlock()
-		writeErr(w, http.StatusConflict, "任务停止时间已到，请先修改停止时间")
+		writeErr(w, http.StatusConflict, "渗透测试暂停时间已到，请先修改暂停时间")
 		return
 	}
 	parent, endWindow := window.context(s.ctx)

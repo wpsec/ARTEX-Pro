@@ -32,7 +32,7 @@ export function TaskRunWindowFields({
   return (
     <div className="grid gap-3">
       <Label className="grid gap-1.5">
-        渗透停止时间
+        渗透测试暂停时间
         <Input type="time" value={value.end} onChange={(event) => onChange({ ...value, end: event.target.value })} />
       </Label>
       <Label className="grid gap-1.5">
@@ -48,9 +48,9 @@ export function TaskRunWindowFields({
 }
 
 const windowStatuses = {
-  approved: { label: "渗透测试结束时间已确认", nextEvent: "停止时间" },
-  closed: { label: "已到停止时间，任务已暂停", nextEvent: null },
-  pausing: { label: "暂停中", nextEvent: null },
+  approved: { label: "渗透测试暂停时间已确认", nextEvent: "暂停时间" },
+  closed: { label: "渗透测试暂停时间已到，渗透测试已暂停", nextEvent: null },
+  pausing: { label: "渗透测试暂停中", nextEvent: null },
 };
 
 function formatTime(value?: string, timeZone?: string) {
@@ -72,13 +72,13 @@ function formatTime(value?: string, timeZone?: string) {
 }
 
 export function TaskRunWindowStatus({ task }: { task: Task }) {
-  if (!task.run_window) return task.run_window_status === "pausing" ? <span>暂停中</span> : null;
+  if (!task.run_window) return task.run_window_status === "pausing" ? <span>渗透测试暂停中</span> : null;
   const status = task.run_window_status && windowStatuses[task.run_window_status];
   const next = status?.nextEvent ? formatTime(task.run_window_next_at, task.run_window.time_zone) : null;
   const deadline = formatTime(task.deadline_at, task.run_window.time_zone);
   return (
     <div className="space-y-0.5 text-muted-foreground text-xs">
-      <div>{runWindowText(task.run_window)}</div>
+      <div>暂停时间 {runWindowText(task.run_window)}</div>
       {status && (
         <div>
           {status.label}
@@ -91,7 +91,7 @@ export function TaskRunWindowStatus({ task }: { task: Task }) {
 }
 
 function runWindowText(window?: TaskRunWindow) {
-  return window ? `停止 ${window.end} ${window.time_zone}` : "未设置";
+  return window ? `${window.end} ${window.time_zone}` : "未设置";
 }
 
 interface WindowRequest {
@@ -115,7 +115,7 @@ function conversationalTime(value: string) {
 function readWindowCommand(message: string, currentTaskId?: string): WindowRequest | null {
   const value = message.trim();
   const direct = /^\/window(?:\s|$)/i.test(value);
-  const conversational = /^(?:把|将|设置|调整|修改)\s*(?:任务|本任务).*(?:停止时间|运行时段|运行窗口|运行时间)/.test(
+  const conversational = /^(?:把|将|设置|调整|修改)\s*(?:任务|本任务).*(?:停止时间|暂停时间|运行时段|运行窗口|运行时间)/.test(
     value,
   );
   if (!direct && !conversational) return null;
@@ -214,7 +214,7 @@ function RunWindowDialog({
       if (updated.id === currentTaskId) {
         onCurrentTaskSaved?.(updated);
       }
-      toast.success(updated.queued ? "停止时间已保存，任务已加入执行队列" : "停止时间已保存，任务已继续执行");
+      toast.success(updated.queued ? "暂停时间已保存，任务已加入执行队列" : "暂停时间已保存，任务已继续执行");
       onClose();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "保存运行窗口失败");
@@ -233,7 +233,9 @@ function RunWindowDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>确认任务运行窗口</DialogTitle>
-          <DialogDescription>保存后任务会直接继续执行，到停止时间自动暂停。</DialogDescription>
+          <DialogDescription>
+            保存后任务会直接继续执行，每天到设定时间暂停渗透测试；已登记漏洞的报告会继续撰写并补全。
+          </DialogDescription>
         </DialogHeader>
         {!request.taskId && (
           <Label className="grid gap-1.5">
@@ -258,20 +260,20 @@ function RunWindowDialog({
             <div className="font-medium text-sm">
               #{task.id} {task.name || task.description}
             </div>
-            <p className="text-muted-foreground text-sm">原停止时间 {runWindowText(task.run_window)}</p>
+            <p className="text-muted-foreground text-sm">原暂停时间 {runWindowText(task.run_window)}</p>
             {task.run_window && (
               <Label>
                 <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />{" "}
-                限制停止时间
+                设置渗透测试暂停时间
               </Label>
             )}
             {enabled && (
               <>
                 <TaskRunWindowFields value={value} onChange={setValue} />
-                <p className="text-muted-foreground text-sm">到停止时间后自动暂停；修改停止时间后直接继续执行。</p>
+                <p className="text-muted-foreground text-sm">到暂停时间后停止渗透测试；修改暂停时间后任务直接继续执行。</p>
               </>
             )}
-            <p className="text-muted-foreground text-sm">新停止时间 {runWindowText(enabled ? value : undefined)}</p>
+            <p className="text-muted-foreground text-sm">新暂停时间 {runWindowText(enabled ? value : undefined)}</p>
           </div>
         )}
         {loading && <p className="text-muted-foreground text-sm">正在读取窗口配置…</p>}

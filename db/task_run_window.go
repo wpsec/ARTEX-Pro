@@ -26,7 +26,7 @@ func ValidateTaskRunWindow(window *TaskRunWindow) (*TaskRunWindow, error) {
 	}
 	end, err := time.Parse("15:04", window.End)
 	if err != nil || end.Format("15:04") != window.End {
-		return nil, errors.New("停止时间必须为 HH:MM")
+		return nil, errors.New("渗透测试暂停时间必须为 HH:MM")
 	}
 	if window.TimeZone == "" || window.TimeZone == "Local" || len(window.TimeZone) > 100 {
 		return nil, errors.New("请选择明确的 IANA 时区")

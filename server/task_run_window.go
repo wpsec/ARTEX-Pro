@@ -13,7 +13,10 @@ import (
 	"github.com/wpsec/ARTEX-local/db"
 )
 
-var errRunWindowClosed = agent.Causef("run_window_closed", "任务停止时间已到", "本次执行已停止。修改停止时间后会自动继续执行")
+var (
+	errRunWindowClosed  = agent.Causef("run_window_closed", "渗透测试暂停时间已到", "渗透测试已暂停。修改暂停时间后任务会继续执行")
+	errRunWindowChanged = agent.Causef("run_window_changed", "渗透测试暂停时间已调整", "当前规划或执行轮次已取消，任务将按新配置继续运行")
+)
 
 type taskRunWindowState struct {
 	policy   *db.TaskRunWindow
@@ -35,12 +38,25 @@ func (t *Task) windowSnapshot() taskRunWindowState {
 	return t.runWindow
 }
 
+// A daily pause stays in effect until the user resumes; rebase its next occurrence only on that explicit action.
+func (t *Task) rollExpiredRunWindowForward(at time.Time) taskRunWindowState {
+	t.runWindowMu.Lock()
+	defer t.runWindowMu.Unlock()
+	if t.runWindow.policy == nil || t.runWindow.stopsAt.IsZero() || at.Before(t.runWindow.stopsAt) {
+		return t.runWindow
+	}
+	if next := t.runWindow.policy.NextStop(at.Add(time.Second)); !next.IsZero() {
+		t.runWindow.stopsAt = next
+	}
+	return t.runWindow
+}
+
 func (t *Task) replaceWindowPolicy(policy *db.TaskRunWindow, revision int64) {
 	t.runWindowMu.Lock()
 	defer t.runWindowMu.Unlock()
 	t.runWindow = newTaskRunWindowState(policy, revision)
 	if t.cancelFinalPlanner != nil {
-		t.cancelFinalPlanner(errRunWindowClosed)
+		t.cancelFinalPlanner(errRunWindowChanged)
 	}
 }
 
@@ -49,7 +65,7 @@ func (t *Task) finalPlannerWindowContext(parent context.Context, revision int64)
 	defer t.runWindowMu.Unlock()
 	ctx, cancel := context.WithCancelCause(parent)
 	if t.runWindow.revision != revision {
-		cancel(errRunWindowClosed)
+		cancel(errRunWindowChanged)
 		return ctx, func() { cancel(nil) }
 	}
 	// The deadline coordinator runs one final planner round per task run.
@@ -118,7 +134,7 @@ func (s *Server) updateTaskRunWindow(w http.ResponseWriter, r *http.Request) {
 	s.m.taskStateMu.Lock()
 	revision, err := pg.ReplaceTaskRunWindow(taskID, *req.Revision, policy)
 	if err == nil {
-		s.engine.Pause(id, errRunWindowClosed)
+		s.engine.Pause(id, errRunWindowChanged)
 		task.updateLifecycle(func(state *taskLifecycleState) {
 			state.Paused = true
 			state.Queued = false
@@ -139,8 +155,8 @@ func (s *Server) updateTaskRunWindow(w http.ResponseWriter, r *http.Request) {
 	}
 	s.cancelTaskChat(id, agent.AbortChatPausedWithTask)
 	if _, err := s.admitPausedTask(task); err != nil {
-		log.Printf("[run-window] task %s 更新停止时间后继续失败: %v", id, err)
-		writeErr(w, http.StatusInternalServerError, "停止时间已保存，但任务未能继续："+err.Error())
+		log.Printf("[run-window] task %s 更新暂停时间后继续失败: %v", id, err)
+		writeErr(w, http.StatusInternalServerError, "暂停时间已保存，但任务未能继续："+err.Error())
 		return
 	}
 	dto := taskDTO(task, s.resolvedTaskStatus(task))
@@ -166,6 +182,7 @@ func (s *Server) pauseOutsideRunWindows() bool {
 		if lifecycle.Paused || isTerminalStatus(lifecycle.Status) || s.engine.IsDeleting(task.ID) {
 			continue
 		}
+		// Reporter runs in independent trigger conversations; stopping exploration must not cancel report work for findings already recorded.
 		s.engine.Pause(task.ID, errRunWindowClosed)
 		s.cancelTaskChat(task.ID, agent.AbortChatPausedWithTask)
 		if err := s.m.ApplyTaskPause(task.ID); err != nil {

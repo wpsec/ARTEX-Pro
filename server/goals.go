@@ -130,6 +130,7 @@ func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued
 	defer s.engine.decInflight(t.ID)
 	lifecycle := t.lifecycleSnapshot()
 	window := t.windowSnapshot()
+	now := time.Now()
 	if requirePaused {
 		if isTerminalStatus(lifecycle.Status) {
 			return false, fmt.Errorf("终态任务不能执行继续")
@@ -137,11 +138,14 @@ func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued
 		if !lifecycle.Paused {
 			return false, fmt.Errorf("仅已暂停的任务可以继续")
 		}
-		if !window.allowed(time.Now()) {
+		if !window.allowed(now) {
+			window = t.rollExpiredRunWindowForward(now)
+		}
+		if !window.allowed(now) {
 			return false, errRunWindowClosed
 		}
 		mode = s.resumeAdmissionMode(t)
-	} else if window.blocksAdmission(lifecycle, time.Now()) {
+	} else if window.blocksAdmission(lifecycle, now) {
 		return false, errRunWindowClosed
 	}
 	wasTerminal := isTerminalStatus(lifecycle.Status)

@@ -1443,7 +1443,7 @@ function TaskControlButton({
 }) {
   const [pending, setPending] = React.useState(false);
   const action = taskControlAction(task.status);
-  const awaitingWindow = task.run_window_status === "closed" || task.run_window_status === "pausing";
+  const windowPausing = task.run_window_status === "pausing";
   const resumeLabel = "继续任务";
   const label = action === "resume" ? resumeLabel : "暂停任务";
   return (
@@ -1451,8 +1451,8 @@ function TaskControlButton({
       size="icon"
       variant="ghost"
       aria-label={label}
-      title={action ? label : "该状态不可暂停或继续"}
-      disabled={!action || pending || (action === "resume" && awaitingWindow)}
+      title={windowPausing ? "渗透测试暂停中" : action ? label : "该状态不可暂停或继续"}
+      disabled={!action || pending || windowPausing}
       onClick={async () => {
         if (!action) return;
         setPending(true);
@@ -3358,13 +3358,13 @@ function CreateTaskSheet({
                   checked={runWindowEnabled}
                   onCheckedChange={(value) => setRunWindowEnabled(value === true)}
                 />
-                设置每日停止时间
+                设置渗透测试暂停时间
               </Label>
               {runWindowEnabled && (
                 <>
                   <TaskRunWindowFields value={runWindow} onChange={setRunWindow} />
                   <FieldDescription>
-                    新建任务会立即开始执行，到停止时间自动暂停。
+                    任务立即开始执行，每天到设定时间暂停渗透测试；已登记漏洞的报告会继续撰写并补全。
                   </FieldDescription>
                 </>
               )}

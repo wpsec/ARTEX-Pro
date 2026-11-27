@@ -67,13 +67,23 @@ const processInstruction =
   /^(?:第[一二三四五六七八九十\d]+步|步骤|先|然后|接着|再次|通过以下|向.+发送|发送|发起|请求(?!(?:已|未)?被拒绝)|调用|执行|运行(?!会话)|替换|构造|将.+(?:改|换)为|在.+(?:输入|运行(?!会话)|发送))|(?:按顺序|参数(?:设置|改为)|请求体|请求头)/;
 const packetOrCommandLine = /^(?:(?:host|content-type|content-length|user-agent|referer)\s*:|[{}]|\$\s)/i;
 
-type BoundHTTPRequest = {
+type ParsedHTTPRequest = {
   url: string;
   method: string;
   headers: [string, string][];
   body: string;
   bodyBase64?: string;
   packet: string;
+};
+
+type BoundHTTPRequest = ParsedHTTPRequest & {
+  bindingId: string;
+  role: string;
+};
+
+type BoundHTTPRequestSelection = {
+  requests: BoundHTTPRequest[];
+  incompleteCount: number;
 };
 
 function unescapeEvidenceMetadata(value: string) {
@@ -98,7 +108,7 @@ function unescapeEvidenceMetadata(value: string) {
     .replaceAll("\\n", "\n");
 }
 
-function parseBoundHTTPRequest(urlValue: string, packet: string): BoundHTTPRequest | undefined {
+function parseBoundHTTPRequest(urlValue: string, packet: string): ParsedHTTPRequest | undefined {
   const urlText = unescapeEvidenceMetadata(urlValue.trim());
   let url: URL;
   try {
@@ -140,22 +150,26 @@ function parseBoundHTTPRequest(urlValue: string, packet: string): BoundHTTPReque
   return { url: urlText, method: request[1].toUpperCase(), headers, body, packet };
 }
 
-function boundHTTPRequestForReplay(content: string): BoundHTTPRequest | undefined {
+function boundHTTPRequestsForReplay(content: string): BoundHTTPRequestSelection {
   const marker = "<!-- artex:bound-traffic-evidence -->";
   const markerIndex = content.indexOf(marker);
-  if (markerIndex < 0) return undefined;
+  if (markerIndex < 0) return { requests: [], incompleteCount: 0 };
   const appendix = content.slice(markerIndex + marker.length);
-  const bindingPattern = /(?:^|\n)#### 证据绑定 \d+（([^）]+)）\s*\r?\n/g;
-  const blocks: { role: string; text: string }[] = [];
+  const bindingPattern = /(?:^|\n)#### 证据绑定 (\d+)(?:（([^）]+)）)?[ \t]*\r?\n/g;
+  const blocks: { bindingId: string; role: string; text: string }[] = [];
   const starts = [...appendix.matchAll(bindingPattern)];
   for (const [index, match] of starts.entries()) {
     const blockStart = (match.index ?? 0) + match[0].length;
     const blockEnd = starts[index + 1]?.index ?? appendix.length;
-    blocks.push({ role: match[1], text: appendix.slice(blockStart, blockEnd) });
+    const text = appendix.slice(blockStart, blockEnd);
+    const role = match[2] ?? unescapeEvidenceMetadata(/^- 角色：[ \t]*(.+)$/m.exec(text)?.[1] ?? "").trim();
+    blocks.push({ bindingId: match[1], role, text });
   }
 
-  let fallback: BoundHTTPRequest | undefined;
+  const requests: BoundHTTPRequest[] = [];
+  let incompleteCount = 0;
   for (const block of blocks) {
+    if (/测试基线/.test(block.role)) continue;
     const urlMatch = /^- 请求地址：[ \t]*(.+)$/m.exec(block.text);
     const requestHeading = block.text.indexOf("##### 请求包");
     const responseHeading = block.text.indexOf("##### 响应包", requestHeading + 1);
@@ -163,37 +177,60 @@ function boundHTTPRequestForReplay(content: string): BoundHTTPRequest | undefine
       requestHeading >= 0 && responseHeading > requestHeading
         ? block.text.slice(requestHeading + "##### 请求包".length, responseHeading)
         : "";
-    if (!urlMatch || !requestSection) continue;
-    const packetMatch = /(?:^|\n)(`{3,})http[ \t]*\r?\n([\s\S]*?)\r?\n\1[ \t]*(?:\r?$|\n)/i.exec(requestSection);
-    if (!packetMatch) continue;
-    // The server adds the fence separator after the stored packet. Preserve the
-    // packet's terminating blank line so header-only requests remain parseable.
-    const packet = packetMatch[2];
-    const parsed = parseBoundHTTPRequest(urlMatch[1], packet);
-    if (!parsed || /测试基线/.test(block.role)) continue;
-    if (/漏洞验证|复核证据/.test(block.role)) return parsed;
-    fallback ??= parsed;
+    const packetMatch = urlMatch && requestSection
+      ? /(?:^|\n)(`{3,})http[ \t]*\r?\n([\s\S]*?)\r?\n\1[ \t]*(?:\r?$|\n)/i.exec(requestSection)
+      : null;
+    const parsed = urlMatch && packetMatch ? parseBoundHTTPRequest(urlMatch[1], packetMatch[2]) : undefined;
+    if (!parsed) {
+      incompleteCount++;
+      continue;
+    }
+    requests.push({ ...parsed, bindingId: block.bindingId, role: block.role || "流量证据" });
   }
-  return fallback;
+  return { requests, incompleteCount };
 }
 
 function pythonString(value: string) {
   return JSON.stringify(value).replace(/[\u2028\u2029]/g, (char) => (char === "\u2028" ? "\\u2028" : "\\u2029"));
 }
 
-function renderPythonReplayScript(request: BoundHTTPRequest) {
-  const headers = JSON.stringify(request.headers, null, 4);
-  let body = "None";
-  if (request.bodyBase64) body = `base64.b64decode(${pythonString(request.bodyBase64)})`;
-  else if (request.body) body = `${pythonString(request.body)}.encode("utf-8")`;
+function pythonBody(request: BoundHTTPRequest) {
+  if (request.bodyBase64) return `base64.b64decode(${pythonString(request.bodyBase64)})`;
+  if (request.body) return `${pythonString(request.body)}.encode("utf-8")`;
+  return "None";
+}
+
+function pythonProxySetup() {
   return [
-    "# 默认直连；设置 BURP_PROXY 后才经 Burp 发送。",
+    "def select_proxy():",
+    '    proxy_text = os.environ.get("BURP_PROXY", "http://127.0.0.1:8080").strip()',
+    "    if not proxy_text:",
+    "        return None",
+    '    proxy = urlsplit(proxy_text if "://" in proxy_text else "http://" + proxy_text)',
+    '    if proxy.scheme != "http" or not proxy.hostname:',
+    '        raise SystemExit("BURP_PROXY 须为 http:// 主机:端口")',
+    "    try:",
+    "        with socket.create_connection((proxy.hostname, proxy.port or 8080), timeout=2):",
+    "            pass",
+    "    except OSError:",
+    '        print("Burp 代理不可用，改为直连目标。", file=sys.stderr)',
+    "        return None",
+    "    return proxy",
+  ];
+}
+
+function renderSinglePythonReplayScript(request: BoundHTTPRequest) {
+  const headers = JSON.stringify(request.headers, null, 4);
+  const body = pythonBody(request);
+  return [
+    "# 默认先经 Burp 发送；Burp 代理不可用时自动改为直连。",
     "# 示例：BURP_PROXY=http://127.0.0.1:8080 python3 replay.py",
     "# HTTPS 拦截时，可通过 BURP_CA_CERT 指向 Burp CA PEM 证书。",
-    "# 显式配置的代理不可用时会报错，不会回退直连。",
+    "# 将 BURP_PROXY 设为空字符串可禁用 Burp 代理。",
     "import base64",
     "import http.client",
     "import os",
+    "import socket",
     "import ssl",
     "import sys",
     "from urllib.parse import urlsplit",
@@ -203,6 +240,8 @@ function renderPythonReplayScript(request: BoundHTTPRequest) {
     `HEADERS = ${headers}`,
     `BODY = ${body}`,
     "",
+    ...pythonProxySetup(),
+    "",
     "def main():",
     "    target = urlsplit(TARGET_URL)",
     "    target_host = target.hostname",
@@ -210,16 +249,11 @@ function renderPythonReplayScript(request: BoundHTTPRequest) {
     '    target_path = target.path or "/"',
     "    if target.query:",
     '        target_path += "?" + target.query',
-    '    proxy_text = os.environ.get("BURP_PROXY", "").strip()',
-    "    proxy = None",
-    "    if proxy_text:",
-    '        proxy = urlsplit(proxy_text if "://" in proxy_text else "http://" + proxy_text)',
-    '        if proxy.scheme != "http" or not proxy.hostname:',
-    '            raise SystemExit("BURP_PROXY 须为 http:// 主机:端口")',
+    "    proxy = select_proxy()",
     '    if target.scheme == "https":',
     "        context = ssl.create_default_context()",
     '        ca_file = os.environ.get("BURP_CA_CERT", "").strip()',
-    "        if ca_file:",
+    "        if ca_file and proxy:",
     "            context.load_verify_locations(cafile=ca_file)",
     "        if proxy:",
     "            connection = http.client.HTTPSConnection(proxy.hostname, proxy.port or 8080, timeout=30, context=context)",
@@ -259,6 +293,116 @@ function renderPythonReplayScript(request: BoundHTTPRequest) {
     'if __name__ == "__main__":',
     "    main()",
   ].join("\n");
+}
+
+function renderMultiplePythonReplayScript(requests: BoundHTTPRequest[]) {
+  const entries = requests
+    .map((request, index) => {
+      const body = pythonBody(request);
+      return [
+        "    {",
+        `        "label": ${pythonString(`请求 ${index + 1}（证据绑定 ${request.bindingId}：${request.role}）`)},`,
+        `        "url": ${pythonString(request.url)},`,
+        `        "method": ${pythonString(request.method)},`,
+        `        "headers": ${JSON.stringify(request.headers)},`,
+        `        "body": ${body},`,
+        "    },",
+      ].join("\n");
+    })
+    .join("\n");
+  return [
+    "# 按证据绑定顺序重放报告列出的请求。",
+    "# 默认先经 Burp 发送；Burp 代理不可用时自动改为直连。",
+    "# 示例：BURP_PROXY=http://127.0.0.1:8080 python3 replay.py",
+    "# HTTPS 拦截时，可通过 BURP_CA_CERT 指向 Burp CA PEM 证书。",
+    "# 将 BURP_PROXY 设为空字符串可禁用 Burp 代理。",
+    "import base64",
+    "import http.client",
+    "import os",
+    "import socket",
+    "import ssl",
+    "import sys",
+    "from urllib.parse import urlsplit",
+    "",
+    "REQUESTS = [",
+    entries,
+    "]",
+    "",
+    ...pythonProxySetup(),
+    "",
+    "def send_request(request, proxy):",
+    '    target = urlsplit(request["url"])',
+    "    target_host = target.hostname",
+    '    target_port = target.port or (443 if target.scheme == "https" else 80)',
+    '    target_path = target.path or "/"',
+    "    if target.query:",
+    '        target_path += "?" + target.query',
+    '    if target.scheme == "https":',
+    "        context = ssl.create_default_context()",
+    '        ca_file = os.environ.get("BURP_CA_CERT", "").strip()',
+    "        if ca_file and proxy:",
+    "            context.load_verify_locations(cafile=ca_file)",
+    "        if proxy:",
+    "            connection = http.client.HTTPSConnection(proxy.hostname, proxy.port or 8080, timeout=30, context=context)",
+    "            connection.set_tunnel(target_host, target_port)",
+    "        else:",
+    "            connection = http.client.HTTPSConnection(target_host, target_port, timeout=30, context=context)",
+    '    elif target.scheme == "http":',
+    "        connection = http.client.HTTPConnection(proxy.hostname, proxy.port or 8080, timeout=30) if proxy else http.client.HTTPConnection(target_host, target_port, timeout=30)",
+    "        if proxy:",
+    '            target_path = target.scheme + "://" + target.netloc + target_path',
+    "    else:",
+    '        raise SystemExit("仅支持 HTTP/HTTPS 证据")',
+    "",
+    '    captured_host = any(name.lower() == "host" for name, _ in request["headers"])',
+    '    connection.putrequest(request["method"], target_path, skip_host=captured_host, skip_accept_encoding=True)',
+    "    had_content_length = False",
+    '    for name, value in request["headers"]:',
+    "        lowered = name.lower()",
+    '        if lowered == "transfer-encoding":',
+    "            continue",
+    '        if lowered == "content-length":',
+    "            had_content_length = True",
+    "            continue",
+    "        connection.putheader(name, value)",
+    '    body = request["body"]',
+    "    if body is not None:",
+    '        connection.putheader("Content-Length", str(len(body)))',
+    "    elif had_content_length:",
+    '        connection.putheader("Content-Length", "0")',
+    "    try:",
+    "        connection.endheaders(body)",
+    "        response = connection.getresponse()",
+    "        print(f\"[{request['label']}] HTTP {response.status} {response.reason}\", flush=True)",
+    "        for name, value in response.getheaders():",
+    '            print(f"{name}: {value}")',
+    '        sys.stdout.buffer.write(b"\\n" + response.read() + b"\\n")',
+    "    finally:",
+    "        connection.close()",
+    "",
+    "def main():",
+    "    proxy = select_proxy()",
+    "    for request in REQUESTS:",
+    "        send_request(request, proxy)",
+    "",
+    'if __name__ == "__main__":',
+    "    main()",
+  ].join("\n");
+}
+
+function renderPythonReplayScript(requests: BoundHTTPRequest[]) {
+  return requests.length === 1
+    ? renderSinglePythonReplayScript(requests[0])
+    : renderMultiplePythonReplayScript(requests);
+}
+
+function markdownHTTPPacket(packet: string) {
+  let fenceLength = 3;
+  for (const match of packet.matchAll(/`+/g)) {
+    fenceLength = Math.max(fenceLength, match[0].length + 1);
+  }
+  const fence = "`".repeat(fenceLength);
+  return `${fence}http\n${packet}\n${fence}`;
 }
 
 const inlineValue = /`[^\s`]*[:=/][^`]*`|\b[a-f0-9]{24,}\b/i;
@@ -601,20 +745,33 @@ export function prepareDeveloperDeliveryReport(
     Boolean(remediationFields),
   ).filter((sentence) => !remediation.includes(sentence));
   const ref = /^\d+$/.test(findingId) ? `（漏洞 #${findingId}）` : "";
-  const replayRequest = boundHTTPRequestForReplay(content);
+  const { requests: replayRequests, incompleteCount: incompleteReplayRequestCount } =
+    boundHTTPRequestsForReplay(content);
   let reproduction = "原报告未注明复现记录。";
-  if (replayRequest) {
+  if (replayRequests.length) {
     reproduction = [
-      "以下请求取自该漏洞绑定的流量证据，可复制到 Burp Suite Repeater 复现或复测。请求包本身不代表已发送或已验证。",
-      ...(replayRequest.bodyBase64
-        ? ["请求正文为二进制内容，以下以 Base64 留存。导入 Repeater 前须还原原始字节。"]
+      "以下请求按证据绑定记录生成，可分别复制到 Burp Suite Repeater 复现或复测。请求包本身不代表已发送或已验证。",
+      ...(incompleteReplayRequestCount
+        ? [`另有 ${incompleteReplayRequestCount} 条绑定的复现相关请求不完整，未生成可重放请求。`]
         : []),
-      `\`\`\`http\n${replayRequest.packet}\n\`\`\``,
+      ...replayRequests.map((request, index) =>
+        [
+          `#### 请求 ${index + 1}（证据绑定 ${request.bindingId}：${escapeMarkdownText(request.role)}）`,
+          ...(request.bodyBase64
+            ? ["请求正文为二进制内容，以下以 Base64 留存。导入 Repeater 前须还原原始字节。"]
+            : []),
+          markdownHTTPPacket(request.packet),
+        ].join("\n\n"),
+      ),
     ].join("\n\n");
   } else if (burpPackageAvailable) {
-    reproduction = "未附完整原始 HTTP 请求报文。";
+    reproduction = incompleteReplayRequestCount
+      ? `已绑定的 HTTP 证据中有 ${incompleteReplayRequestCount} 条请求不完整，未生成可重放请求。`
+      : "未附完整原始 HTTP 请求报文。";
   } else if (httpRecorded) {
-    reproduction = `未附完整原始 HTTP 请求报文，请在漏洞详情中核对${ref}。`;
+    reproduction = incompleteReplayRequestCount
+      ? `已绑定的 HTTP 证据中有 ${incompleteReplayRequestCount} 条请求不完整，请在漏洞详情中核对${ref}。`
+      : `未附完整原始 HTTP 请求报文，请在漏洞详情中核对${ref}。`;
   } else if (nonHTTP) {
     reproduction = `本次为非 HTTP 测试，请在有访问权限的漏洞详情中查阅记录${ref}。`;
   } else if (httpExample) {
@@ -658,10 +815,10 @@ export function prepareDeveloperDeliveryReport(
     ...[...new Set(pythonLocations)].map((location) => `用例位置：\`${location}\``),
     ...(pythonLocations.length ? [`预期结果：${paragraph(pythonExpected, "原报告未记录。")}`] : []),
   ];
-  if (replayRequest) {
+  if (replayRequests.length) {
     python.push(
-      "脚本按绑定的漏洞验证或复核请求生成，采集到的认证信息和请求正文保持原值。默认直连；设置 `BURP_PROXY=http://127.0.0.1:8080` 后经 Burp 发送。显式代理不可用时会报错且不会回退直连；HTTPS 可设置 `BURP_CA_CERT` 信任 Burp CA。",
-      `\`\`\`python\n${renderPythonReplayScript(replayRequest)}\n\`\`\``,
+      "脚本按上方展示的绑定请求生成，采集到的认证信息和请求正文保持原值。脚本按报告中的顺序逐条重放；默认先尝试通过本机 Burp，代理不可用时提示后改为直连继续运行。可用 `BURP_PROXY` 指定代理，设为空字符串可禁用代理；HTTPS 拦截可设置 `BURP_CA_CERT` 信任 Burp CA。",
+      `\`\`\`python\n${renderPythonReplayScript(replayRequests)}\n\`\`\``,
     );
   } else if (!pythonLocations.length) {
     python.push(
@@ -682,9 +839,12 @@ export function prepareDeveloperDeliveryReport(
   } else if (reportEvidenceVersion !== currentEvidenceVersion) {
     issues.push("测试记录有更新，交付前请核对报告");
   }
-  if (burpPackageAvailable || replayRequest || httpRecorded || httpExample) {
-    if (!replayRequest) issues.push("缺少完整原始 HTTP 请求报文");
-    if (replayRequest?.bodyBase64) issues.push("留存请求正文为二进制，无法直接复制使用");
+  if (burpPackageAvailable || replayRequests.length || httpRecorded || httpExample) {
+    if (!replayRequests.length) issues.push("缺少完整原始 HTTP 请求报文");
+    if (incompleteReplayRequestCount) issues.push("部分绑定流量缺少完整 HTTP 请求报文");
+    if (replayRequests.some((request) => request.bodyBase64)) {
+      issues.push("留存请求正文为二进制，无法直接复制使用");
+    }
     if (!recordedVerification || recordedVerification.endsWith("待核对。")) issues.push("Burp 验证状态待核对");
   } else if (!nonHTTP) {
     issues.push("缺少 HTTP 证据或 Burp 不适用说明");

@@ -600,7 +600,7 @@ test("renders the bound supporting request and builds its Python replay script",
     report,
     /### Burp 复现包[\s\S]*```http\nPOST \/api\/records\?id=other HTTP\/1\.1\nHost: audit\.example\.test\nAuthorization: Bearer captured-fixture-token/,
   );
-  assert.match(report, /默认直连；设置 `BURP_PROXY=http:\/\/127\.0\.0\.1:8080` 后经 Burp 发送。/);
+  assert.match(report, /默认先尝试通过本机 Burp，代理不可用时提示后改为直连继续运行。/);
   assert.match(report, /TARGET_URL = "https:\/\/audit\.example\.test\/api\/records\?id=other"/);
   assert.match(report, /METHOD = "POST"/);
   assert.match(report, /"Authorization"[\s\S]*"Bearer captured-fixture-token"/);
