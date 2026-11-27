@@ -35,6 +35,9 @@ func (s *Server) launchTask(t *Task, seedText string, seedFirstIntent bool) {
 		s.seedFirstIntent(t)
 	}
 	s.engine.decInflight(t.ID)
+	if t.windowSnapshot().waitingToStart(time.Now()) {
+		return
+	}
 	if _, err := s.admitTask(t, "bootstrap"); err != nil {
 		log.Printf("[concurrency] task %s 启动失败: %v", t.ID, err)
 	}
@@ -138,15 +141,41 @@ func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued
 		if !lifecycle.Paused {
 			return false, fmt.Errorf("仅已暂停的任务可以继续")
 		}
+		if window.waitingToStart(now) && lifecycle.Status == "created" {
+			if err := s.m.SetTaskPaused(t.ID, false); err != nil {
+				return false, err
+			}
+			s.engine.Resume(t)
+			return false, nil
+		}
 		if !window.allowed(now) {
 			window = t.rollExpiredRunWindowForward(now)
 		}
+		if window.policy != nil && !window.policy.IsDailyPause() && !window.stopsAt.IsZero() && !now.Before(window.stopsAt) {
+			if s.m.pg == nil {
+				return false, fmt.Errorf("管理后台数据源(PostgreSQL)未连接")
+			}
+			taskID, err := strconv.ParseInt(t.ID, 10, 64)
+			if err != nil {
+				return false, fmt.Errorf("无效任务 ID: %w", err)
+			}
+			s.m.taskStateMu.Lock()
+			revision, err := s.m.pg.ReplaceTaskRunWindow(taskID, window.revision, nil, true)
+			if err == nil {
+				t.replaceWindowPolicy(nil, revision)
+				window = t.windowSnapshot()
+			}
+			s.m.taskStateMu.Unlock()
+			if err != nil {
+				return false, fmt.Errorf("解除已结束的一次性定时安排失败: %w", err)
+			}
+		}
 		if !window.allowed(now) {
-			return false, errRunWindowClosed
+			return false, window.blockedCause(now)
 		}
 		mode = s.resumeAdmissionMode(t)
 	} else if window.blocksAdmission(lifecycle, now) {
-		return false, errRunWindowClosed
+		return false, window.blockedCause(now)
 	}
 	wasTerminal := isTerminalStatus(lifecycle.Status)
 	wasPaused := lifecycle.Paused || s.engine.IsPaused(t.ID)

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/wpsec/ARTEX-local/agent"
 	"github.com/wpsec/ARTEX-local/db"
@@ -142,6 +143,11 @@ func (s *Server) applyTaskControlWithCause(t *Task, action string, pauseCause er
 		}
 		out.Queued = queued
 		out.Status = map[bool]string{true: "queued", false: "running"}[queued]
+		lifecycle := t.lifecycleSnapshot()
+		if !queued && lifecycle.Status == "created" && !lifecycle.Paused && !lifecycle.Queued &&
+			t.windowSnapshot().waitingToStart(time.Now()) {
+			out.Status = "created"
+		}
 	default:
 		return out, fmt.Errorf("action must be pause|resume")
 	}

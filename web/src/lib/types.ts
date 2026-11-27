@@ -5,7 +5,9 @@ export type TaskStatus = "created" | "queued" | "running" | "paused" | "done" | 
 export type EngineMode = "exploring" | "paused" | "stalled" | "idle";
 
 export interface TaskRunWindow {
-  end: string;
+  start_at?: string;
+  pause_at?: string;
+  end?: string;
   time_zone: string;
 }
 
@@ -28,7 +30,7 @@ export interface Task {
   queued?: boolean;
   run_window?: TaskRunWindow;
   run_window_revision?: number;
-  run_window_status?: "approved" | "closed" | "pausing";
+  run_window_status?: "scheduled" | "approved" | "closed" | "pausing";
   run_window_next_at?: string;
   deadline_at?: string;
   active?: boolean;

@@ -16,18 +16,21 @@ import (
 var (
 	errRunWindowClosed  = agent.Causef("run_window_closed", "渗透测试暂停时间已到", "渗透测试已暂停。修改暂停时间后任务会继续执行")
 	errRunWindowChanged = agent.Causef("run_window_changed", "渗透测试暂停时间已调整", "当前规划或执行轮次已取消，任务将按新配置继续运行")
+	errRunWindowPending = agent.Causef("run_window_not_started", "任务尚未到自动启动时间", "任务将在设定的自动启动时间开始")
 )
 
 type taskRunWindowState struct {
 	policy   *db.TaskRunWindow
 	revision int64
+	startsAt time.Time
 	stopsAt  time.Time
 }
 
 func newTaskRunWindowState(policy *db.TaskRunWindow, revision int64) taskRunWindowState {
 	state := taskRunWindowState{policy: policy, revision: revision}
 	if policy != nil {
-		state.stopsAt = policy.NextStop(time.Now())
+		state.startsAt = policy.StartTime()
+		state.stopsAt = policy.PauseTime(time.Now())
 	}
 	return state
 }
@@ -79,7 +82,35 @@ func (t *Task) finalPlannerWindowContext(parent context.Context, revision int64)
 }
 
 func (w taskRunWindowState) allowed(at time.Time) bool {
-	return w.policy == nil || w.stopsAt.IsZero() || at.Before(w.stopsAt)
+	if w.policy == nil {
+		return true
+	}
+	if !w.startsAt.IsZero() && at.Before(w.startsAt) {
+		return false
+	}
+	return w.stopsAt.IsZero() || at.Before(w.stopsAt)
+}
+
+func (w taskRunWindowState) waitingToStart(at time.Time) bool {
+	return !w.startsAt.IsZero() && at.Before(w.startsAt)
+}
+
+func (w taskRunWindowState) startDue(at time.Time) bool {
+	return !w.startsAt.IsZero() && !at.Before(w.startsAt) && (w.stopsAt.IsZero() || at.Before(w.stopsAt))
+}
+
+func (w taskRunWindowState) nextEvent(at time.Time) time.Time {
+	if w.waitingToStart(at) {
+		return w.startsAt
+	}
+	return w.stopsAt
+}
+
+func (w taskRunWindowState) blockedCause(at time.Time) error {
+	if w.waitingToStart(at) {
+		return errRunWindowPending
+	}
+	return errRunWindowClosed
 }
 
 func (w taskRunWindowState) blocksAdmission(lifecycle taskLifecycleState, at time.Time) bool {
@@ -117,6 +148,12 @@ func (s *Server) updateTaskRunWindow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	now := time.Now()
+	scheduled := policy != nil && !policy.StartTime().IsZero() && policy.StartTime().After(now)
+	if policy != nil && !policy.IsDailyPause() && !policy.PauseTime(now).After(now) {
+		writeErr(w, http.StatusBadRequest, "自动暂停时间必须晚于当前时间")
+		return
+	}
 	id := r.PathValue("id")
 	s.concMu.Lock()
 	task, ok := s.m.Task(id)
@@ -131,12 +168,28 @@ func (s *Server) updateTaskRunWindow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "无效任务")
 		return
 	}
+	lifecycle := task.lifecycleSnapshot()
+	if policy != nil && !policy.StartTime().IsZero() && policy.StartTime().After(now) &&
+		(lifecycle.Status != "created" || lifecycle.FirstRunAt > 0) {
+		s.concMu.Unlock()
+		writeErr(w, http.StatusBadRequest, "已开始的任务不能改为未来启动，请只调整自动暂停时间")
+		return
+	}
+	previousWindow := task.windowSnapshot()
+	if lifecycle.FirstRunAt > 0 && policy != nil && !previousWindow.startsAt.IsZero() &&
+		!policy.StartTime().Equal(previousWindow.startsAt) {
+		s.concMu.Unlock()
+		writeErr(w, http.StatusBadRequest, "任务已启动，不能修改自动启动时间，请只调整自动暂停时间")
+		return
+	}
 	s.m.taskStateMu.Lock()
-	revision, err := pg.ReplaceTaskRunWindow(taskID, *req.Revision, policy)
+	revision, err := pg.ReplaceTaskRunWindow(taskID, *req.Revision, policy, !scheduled)
 	if err == nil {
-		s.engine.Pause(id, errRunWindowChanged)
+		if !scheduled {
+			s.engine.Pause(id, errRunWindowChanged)
+		}
 		task.updateLifecycle(func(state *taskLifecycleState) {
-			state.Paused = true
+			state.Paused = !scheduled
 			state.Queued = false
 			state.QueuedAt = 0
 		})
@@ -154,6 +207,11 @@ func (s *Server) updateTaskRunWindow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.cancelTaskChat(id, agent.AbortChatPausedWithTask)
+	if scheduled {
+		dto := taskDTO(task, s.resolvedTaskStatus(task))
+		writeJSON(w, http.StatusOK, dto)
+		return
+	}
 	if _, err := s.admitPausedTask(task); err != nil {
 		log.Printf("[run-window] task %s 更新暂停时间后继续失败: %v", id, err)
 		writeErr(w, http.StatusInternalServerError, "暂停时间已保存，但任务未能继续："+err.Error())
@@ -179,7 +237,8 @@ func (s *Server) pauseOutsideRunWindows() bool {
 	changed := false
 	for _, task := range candidates {
 		lifecycle := task.lifecycleSnapshot()
-		if lifecycle.Paused || isTerminalStatus(lifecycle.Status) || s.engine.IsDeleting(task.ID) {
+		window := task.windowSnapshot()
+		if lifecycle.Paused || window.waitingToStart(now) || isTerminalStatus(lifecycle.Status) || s.engine.IsDeleting(task.ID) {
 			continue
 		}
 		// Reporter runs in independent trigger conversations; stopping exploration must not cancel report work for findings already recorded.
@@ -202,11 +261,35 @@ func (s *Server) runWindowGuard(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			changed := s.startScheduledTasks(time.Now())
 			if s.pauseOutsideRunWindows() {
+				changed = true
+			}
+			if changed {
 				s.reconcileConcurrency()
 			}
 		}
 	}
+}
+
+func (s *Server) startScheduledTasks(at time.Time) bool {
+	started := false
+	for _, task := range s.m.List() {
+		lifecycle := task.lifecycleSnapshot()
+		window := task.windowSnapshot()
+		if lifecycle.Status != "created" || lifecycle.Paused || lifecycle.Queued || isTerminalStatus(lifecycle.Status) ||
+			!window.startDue(at) || s.engine.IsDeleting(task.ID) || s.engine.inflightCount(task.ID) > 0 {
+			continue
+		}
+		if _, err := s.admitTask(task, "bootstrap"); err != nil {
+			if !errors.Is(err, errRunWindowClosed) {
+				log.Printf("[run-window] task %s 自动启动失败: %v", task.ID, err)
+			}
+			continue
+		}
+		started = true
+	}
+	return started
 }
 
 func (s *Server) fillWindowDrainState(dto *TaskDTO, task *Task) {

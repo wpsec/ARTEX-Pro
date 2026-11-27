@@ -11,22 +11,24 @@ import (
 
 var ErrTaskRunWindowConflict = errors.New("task run window changed or task is unavailable")
 
-// TaskRunWindow defines the local wall-clock time at which the current task run stops.
+// TaskRunWindow stores a one-time start/pause schedule. End remains readable for
+// tasks created by the older daily-pause configuration.
 type TaskRunWindow struct {
-	End      string `json:"end"`
+	StartAt  string `json:"start_at,omitempty"`
+	PauseAt  string `json:"pause_at,omitempty"`
+	End      string `json:"end,omitempty"`
 	TimeZone string `json:"time_zone"`
 
-	location  *time.Location
-	endMinute int
+	location   *time.Location
+	startAt    time.Time
+	pauseAt    time.Time
+	endMinute  int
+	dailyPause bool
 }
 
 func ValidateTaskRunWindow(window *TaskRunWindow) (*TaskRunWindow, error) {
 	if window == nil {
 		return nil, nil
-	}
-	end, err := time.Parse("15:04", window.End)
-	if err != nil || end.Format("15:04") != window.End {
-		return nil, errors.New("渗透测试暂停时间必须为 HH:MM")
 	}
 	if window.TimeZone == "" || window.TimeZone == "Local" || len(window.TimeZone) > 100 {
 		return nil, errors.New("请选择明确的 IANA 时区")
@@ -37,16 +39,66 @@ func ValidateTaskRunWindow(window *TaskRunWindow) (*TaskRunWindow, error) {
 	}
 	normalized := *window
 	normalized.location = location
-	normalized.endMinute = end.Hour()*60 + end.Minute()
+	if window.End != "" && window.StartAt == "" && window.PauseAt == "" {
+		end, err := time.Parse("15:04", window.End)
+		if err != nil || end.Format("15:04") != window.End {
+			return nil, errors.New("每日暂停时间必须为 HH:MM")
+		}
+		normalized.dailyPause = true
+		normalized.endMinute = end.Hour()*60 + end.Minute()
+		return &normalized, nil
+	}
+	if window.End != "" || window.StartAt == "" || window.PauseAt == "" {
+		return nil, errors.New("自动启动时间和自动暂停时间必须同时设置")
+	}
+	const layout = "2006-01-02T15:04"
+	startAt, err := time.ParseInLocation(layout, window.StartAt, location)
+	if err != nil || startAt.Format(layout) != window.StartAt {
+		return nil, errors.New("自动启动时间格式必须为 YYYY-MM-DDTHH:MM")
+	}
+	pauseAt, err := time.ParseInLocation(layout, window.PauseAt, location)
+	if err != nil || pauseAt.Format(layout) != window.PauseAt {
+		return nil, errors.New("自动暂停时间格式必须为 YYYY-MM-DDTHH:MM")
+	}
+	if !pauseAt.After(startAt) {
+		return nil, errors.New("自动暂停时间必须晚于自动启动时间")
+	}
+	normalized.startAt = startAt
+	normalized.pauseAt = pauseAt
 	return &normalized, nil
 }
 
-// NextStop returns the first local occurrence of the configured stop time that
-// has not passed yet. A run stays stopped after that instant until its stop time
-// is changed, so callers retain this value instead of recalculating it later.
+// StartTime returns the configured one-time start instant, or zero for legacy
+// daily schedules.
+func (w *TaskRunWindow) StartTime() time.Time {
+	if w == nil {
+		return time.Time{}
+	}
+	return w.startAt
+}
+
+// PauseTime returns the configured one-time pause instant, or the next legacy
+// daily pause for the supplied time.
+func (w *TaskRunWindow) PauseTime(at time.Time) time.Time {
+	if w == nil {
+		return time.Time{}
+	}
+	if !w.pauseAt.IsZero() {
+		return w.pauseAt
+	}
+	return w.NextStop(at)
+}
+
+func (w *TaskRunWindow) IsDailyPause() bool { return w != nil && w.dailyPause }
+
+// NextStop returns the one-time pause instant, or the first local occurrence of
+// a legacy daily pause time that has not passed yet.
 func (w *TaskRunWindow) NextStop(at time.Time) time.Time {
 	if w == nil || w.location == nil {
 		return time.Time{}
+	}
+	if !w.pauseAt.IsZero() {
+		return w.pauseAt
 	}
 	first := at.Truncate(time.Minute)
 	if first.Before(at) {
@@ -72,7 +124,7 @@ func decodeTaskRunWindow(raw []byte) (*TaskRunWindow, error) {
 	return ValidateTaskRunWindow(window)
 }
 
-func (d *DB) ReplaceTaskRunWindow(taskID, revision int64, next *TaskRunWindow) (int64, error) {
+func (d *DB) ReplaceTaskRunWindow(taskID, revision int64, next *TaskRunWindow, pausedState ...bool) (int64, error) {
 	normalized, err := ValidateTaskRunWindow(next)
 	if err != nil {
 		return 0, err
@@ -80,6 +132,10 @@ func (d *DB) ReplaceTaskRunWindow(taskID, revision int64, next *TaskRunWindow) (
 	data, err := json.Marshal(normalized)
 	if err != nil {
 		return 0, err
+	}
+	paused := normalized == nil || normalized.StartTime().IsZero() || !normalized.StartTime().After(time.Now())
+	if len(pausedState) > 0 {
+		paused = pausedState[0]
 	}
 	tx, err := d.Begin()
 	if err != nil {
@@ -103,7 +159,7 @@ FOR UPDATE`, taskID).Scan(&previous, &current); err != nil {
 	revision++
 	if _, err := tx.Exec(`
 UPDATE tasks SET run_window=NULLIF($2::jsonb,'null'::jsonb), run_window_revision=$3,
-paused=true, queued=false, queued_at=NULL WHERE id=$1`, taskID, string(data), revision); err != nil {
+paused=$4, queued=false, queued_at=NULL WHERE id=$1`, taskID, string(data), revision, paused); err != nil {
 		return 0, err
 	}
 	var oldValue any

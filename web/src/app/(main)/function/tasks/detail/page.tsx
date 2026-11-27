@@ -260,15 +260,16 @@ function TaskDetailInner() {
         if (taskLoadInFlight.current !== request) return;
         const base = { ...task };
         const at = s?.active_task;
+        const waitingForScheduledStart = base.status === "created" && base.run_window_status === "scheduled";
         if (at) {
           base.in_flight = at.in_flight;
           base.goals_total = at.goals_total;
           base.goals_met = at.goals_met;
           base.engine_mode = s?.engine_mode ?? at.engine_mode;
-          base.paused = at.paused;
+          base.paused = waitingForScheduledStart ? false : at.paused;
         }
         setTask(base);
-        setPaused(at?.paused ?? base.paused ?? false);
+        setPaused(waitingForScheduledStart ? false : (at?.paused ?? base.paused ?? false));
       })
       .catch(() => {
         // Keep the last rendered task state during a transient poll failure.
@@ -315,6 +316,8 @@ function TaskDetailInner() {
     try {
       await api.controlTask(id, next ? "pause" : "resume");
       setPaused(next);
+      taskLoadInFlight.current = null;
+      load();
       toast.success(next ? "已暂停探索" : "已恢复探索");
     } catch (e) {
       toast.error("操作失败：" + (e as Error).message);
@@ -432,9 +435,7 @@ function TaskDetailInner() {
             size="sm"
             variant={controlVariant}
             onClick={togglePause}
-            disabled={
-              terminal || (paused && (task.run_window_status === "closed" || task.run_window_status === "pausing"))
-            }
+            disabled={terminal || (paused && task.run_window_status === "pausing")}
           >
             {controlIcon}
             {controlLabel}

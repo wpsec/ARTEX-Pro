@@ -3156,11 +3156,18 @@ function CreateTaskSheet({
       toast.error(`最多关联 ${MAX_SOURCE_TASKS} 个来源任务`);
       return;
     }
+    if (
+      runWindowEnabled &&
+      (!runWindow.start_at || !runWindow.pause_at || !runWindow.time_zone || runWindow.pause_at <= runWindow.start_at)
+    ) {
+      toast.error("请填写有效时区，并确保自动暂停时间晚于自动启动时间");
+      return;
+    }
     setCreating(true);
     try {
       const timeoutSec = Math.max(0, Math.floor(Number(timeoutMin) || 0)) * 60;
       const heartbeatSec = Math.max(10, Math.floor(Number(heartbeatMin) || 10)) * 60; // 下限 10min，与后端归一一致
-      await api.createTask({
+      const created = await api.createTask({
         name: name.trim(),
         categoryId: categoryID,
         description: description.trim(),
@@ -3177,7 +3184,7 @@ function CreateTaskSheet({
           .map((r) => ({ ...r, pattern: r.pattern.trim() }))
           .filter((r) => r.pattern !== ""),
       });
-      toast.success("任务已创建");
+      toast.success(created.run_window_status === "scheduled" ? "定时任务已创建，等待自动启动" : "任务已创建");
       setName("");
       setCategoryID(undefined);
       setDescription("");
@@ -3358,13 +3365,13 @@ function CreateTaskSheet({
                   checked={runWindowEnabled}
                   onCheckedChange={(value) => setRunWindowEnabled(value === true)}
                 />
-                设置渗透测试暂停时间
+                设置定时任务
               </Label>
               {runWindowEnabled && (
                 <>
                   <TaskRunWindowFields value={runWindow} onChange={setRunWindow} />
                   <FieldDescription>
-                    任务立即开始执行，每天到设定时间暂停渗透测试；已登记漏洞的报告会继续撰写并补全。
+                    指定年月日自动启动和自动暂停，各执行一次。暂停后任务进入暂停状态，已有漏洞报告会继续补全。
                   </FieldDescription>
                 </>
               )}

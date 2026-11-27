@@ -117,10 +117,15 @@ func taskDTO(t *Task, status string) TaskDTO {
 	window := t.windowSnapshot()
 	var windowStatus, nextAt string
 	if window.policy != nil && !isTerminalStatus(lifecycle.Status) {
-		if window.allowed(time.Now()) {
+		now := time.Now()
+		switch {
+		case window.waitingToStart(now):
+			windowStatus = "scheduled"
+			nextAt = rfc3339(window.startsAt)
+		case window.allowed(now):
 			windowStatus = "approved"
-			nextAt = rfc3339(window.stopsAt)
-		} else {
+			nextAt = rfc3339(window.nextEvent(now))
+		default:
 			windowStatus = "closed"
 		}
 	}

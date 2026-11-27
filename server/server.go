@@ -319,7 +319,8 @@ func (s *Server) restoreTaskRuntimes() {
 	// FIFO. Paused loops remain idle; queued tasks are admitted below as slots allow.
 	for _, t := range m.List() {
 		lifecycle := t.lifecycleSnapshot()
-		if !lifecycle.Queued && !isTerminalStatus(lifecycle.Status) && t.windowSnapshot().allowed(time.Now()) {
+		window := t.windowSnapshot()
+		if !(lifecycle.Status == "created" && !window.startsAt.IsZero()) && !lifecycle.Queued && !isTerminalStatus(lifecycle.Status) && window.allowed(time.Now()) {
 			s.engine.Run(s.ctx, t)
 		}
 	}
@@ -1113,6 +1114,9 @@ func (s *Server) resolvedTaskStatus(t *Task) string {
 		return "created"
 	}
 	lifecycle := t.lifecycleSnapshot()
+	if lifecycle.Status == "created" && !lifecycle.Paused && !lifecycle.Queued && t.windowSnapshot().waitingToStart(time.Now()) {
+		return "created"
+	}
 	switch {
 	case isTerminalStatus(lifecycle.Status):
 		return lifecycle.Status
@@ -1528,6 +1532,10 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	window, err := db.ValidateTaskRunWindow(req.RunWindow)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if window != nil && !window.IsDailyPause() && !window.PauseTime(time.Now()).After(time.Now()) {
+		writeErr(w, http.StatusBadRequest, "自动暂停时间必须晚于当前时间")
 		return
 	}
 	if strings.TrimSpace(req.Description) == "" {
@@ -3777,9 +3785,14 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	window := t.windowSnapshot()
-	if !window.allowed(time.Now()) {
+	now := time.Now()
+	if !window.allowed(now) {
 		s.chatMu.Unlock()
-		writeErr(w, http.StatusConflict, "渗透测试暂停时间已到，请先修改暂停时间")
+		if window.waitingToStart(now) {
+			writeErr(w, http.StatusConflict, "任务尚未到自动启动时间，请等待定时启动")
+		} else {
+			writeErr(w, http.StatusConflict, "渗透测试暂停时间已到，请先修改暂停时间")
+		}
 		return
 	}
 	parent, endWindow := window.context(s.ctx)

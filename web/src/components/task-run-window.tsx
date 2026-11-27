@@ -19,7 +19,7 @@ import { api } from "@/lib/api";
 import type { Task, TaskRunWindow } from "@/lib/types";
 
 export function defaultRunWindow(): TaskRunWindow {
-  return { end: "08:00", time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" };
+  return { start_at: "", pause_at: "", time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" };
 }
 
 export function TaskRunWindowFields({
@@ -29,12 +29,43 @@ export function TaskRunWindowFields({
   value: TaskRunWindow;
   onChange: (value: TaskRunWindow) => void;
 }) {
+  const legacyDaily = value.end !== undefined && !value.start_at && !value.pause_at;
   return (
     <div className="grid gap-3">
-      <Label className="grid gap-1.5">
-        渗透测试暂停时间
-        <Input type="time" value={value.end} onChange={(event) => onChange({ ...value, end: event.target.value })} />
-      </Label>
+      {legacyDaily ? (
+        <>
+          <Label className="grid gap-1.5">
+            旧版每日暂停时间
+            <Input type="time" value={value.end ?? ""} onChange={(event) => onChange({ ...value, end: event.target.value })} />
+          </Label>
+          <button
+            type="button"
+            className="text-left text-primary text-sm underline-offset-4 hover:underline"
+            onClick={() => onChange({ start_at: "", pause_at: "", time_zone: value.time_zone })}
+          >
+            改为指定日期的一次性定时任务
+          </button>
+        </>
+      ) : (
+        <>
+          <Label className="grid gap-1.5">
+            自动启动时间
+            <Input
+              type="datetime-local"
+              value={value.start_at ?? ""}
+              onChange={(event) => onChange({ ...value, end: undefined, start_at: event.target.value })}
+            />
+          </Label>
+          <Label className="grid gap-1.5">
+            自动暂停时间
+            <Input
+              type="datetime-local"
+              value={value.pause_at ?? ""}
+              onChange={(event) => onChange({ ...value, end: undefined, pause_at: event.target.value })}
+            />
+          </Label>
+        </>
+      )}
       <Label className="grid gap-1.5">
         时区
         <Input
@@ -48,8 +79,9 @@ export function TaskRunWindowFields({
 }
 
 const windowStatuses = {
-  approved: { label: "渗透测试暂停时间已确认", nextEvent: "暂停时间" },
-  closed: { label: "渗透测试暂停时间已到，渗透测试已暂停", nextEvent: null },
+  scheduled: { label: "等待定时启动", nextEvent: "自动启动时间" },
+  approved: { label: "渗透测试运行中", nextEvent: "自动暂停时间" },
+  closed: { label: "渗透测试已暂停", nextEvent: null },
   pausing: { label: "渗透测试暂停中", nextEvent: null },
 };
 
@@ -78,7 +110,7 @@ export function TaskRunWindowStatus({ task }: { task: Task }) {
   const deadline = formatTime(task.deadline_at, task.run_window.time_zone);
   return (
     <div className="space-y-0.5 text-muted-foreground text-xs">
-      <div>暂停时间 {runWindowText(task.run_window)}</div>
+      <div>定时安排 {runWindowText(task.run_window)}</div>
       {status && (
         <div>
           {status.label}
@@ -91,7 +123,13 @@ export function TaskRunWindowStatus({ task }: { task: Task }) {
 }
 
 function runWindowText(window?: TaskRunWindow) {
-  return window ? `${window.end} ${window.time_zone}` : "未设置";
+  if (!window) return "未设置";
+  if (window.start_at || window.pause_at) {
+    const start = window.start_at?.replace("T", " ") || "未设置";
+    const pause = window.pause_at?.replace("T", " ") || "未设置";
+    return `${start} 启动 · ${pause} 暂停（${window.time_zone}）`;
+  }
+  return window.end ? `旧版每日 ${window.end} 暂停（${window.time_zone}）` : "未设置";
 }
 
 interface WindowRequest {
@@ -115,9 +153,7 @@ function conversationalTime(value: string) {
 function readWindowCommand(message: string, currentTaskId?: string): WindowRequest | null {
   const value = message.trim();
   const direct = /^\/window(?:\s|$)/i.test(value);
-  const conversational = /^(?:把|将|设置|调整|修改)\s*(?:任务|本任务).*(?:停止时间|暂停时间|运行时段|运行窗口|运行时间)/.test(
-    value,
-  );
+  const conversational = /^(?:把|将|设置|调整|修改)\s*(?:任务|本任务).*(?:自动启动时间|自动暂停时间|启动时间|开始时间|停止时间|暂停时间|运行时段|运行窗口|运行时间)/.test(value);
   if (!direct && !conversational) return null;
   const text = direct ? value.replace(/^\/window\s*/i, "") : value;
   const taskIds = direct
@@ -125,13 +161,34 @@ function readWindowCommand(message: string, currentTaskId?: string): WindowReque
     : [...text.matchAll(/(?:任务\s*#?\s*|#)([1-9]\d*)/g)].map((match) => match[1]);
   const uniqueIds = [...new Set(taskIds)];
   const taskId = uniqueIds.length <= 1 ? (uniqueIds[0] ?? currentTaskId) : undefined;
+  const dateTimes = [...text.matchAll(/(\d{4})[-/.年]\s*(\d{1,2})[-/.月]\s*(\d{1,2})日?\s*(\d{1,2})[:：](\d{2})/g)];
+  const dateTime = dateTimes.at(-1);
+  const zone = text.match(/\b(?:UTC|[A-Za-z_]+(?:\/[A-Za-z_+\-\d]+)+)\b/)?.[0];
+  if (dateTime) {
+    const [, year, month, day, hour, minute] = dateTime;
+    const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute)));
+    if (
+      parsed.getUTCFullYear() !== Number(year) ||
+      parsed.getUTCMonth() !== Number(month) - 1 ||
+      parsed.getUTCDate() !== Number(day) ||
+      parsed.getUTCHours() !== Number(hour) ||
+      parsed.getUTCMinutes() !== Number(minute)
+    ) {
+      return { taskId };
+    }
+    const field = /启动|开始/.test(text) && !/暂停/.test(text) ? "start_at" : "pause_at";
+    const draft: TaskRunWindow = { time_zone: zone ?? "" };
+    draft[field] = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(hour).padStart(2, "0")}:${minute}`;
+    draft.end = undefined;
+    return { taskId, draft };
+  }
   const timePattern = String.raw`(?:凌晨|早上|上午|中午|下午|晚上)?\s*\d{1,2}\s*(?:[:：]\d{2}|点(?:\d{1,2}分|半)?)`;
   const times = [...text.matchAll(new RegExp(timePattern, "g"))];
   const match = times.at(-1);
   if (!match) return { taskId };
+  if (/启动|开始/.test(text) && !/暂停/.test(text)) return { taskId };
   const end = conversationalTime(match[0].trim());
   if (!end) return { taskId };
-  const zone = text.match(/\b(?:UTC|[A-Za-z_]+(?:\/[A-Za-z_+\-\d]+)+)\b/)?.[0];
   return {
     taskId,
     draft: {
@@ -189,9 +246,15 @@ function RunWindowDialog({
         if (!active) return;
         setTask(current);
         const original = current.run_window ?? defaultRunWindow();
-        setValue(
-          request.draft ? { ...request.draft, time_zone: request.draft.time_zone || original.time_zone } : original,
-        );
+        const draft = request.draft;
+        const merged = draft
+          ? { ...original, ...draft, time_zone: draft.time_zone || original.time_zone }
+          : original;
+        if (draft?.end && original.pause_at && !draft.start_at && !draft.pause_at) {
+          merged.end = undefined;
+          merged.pause_at = `${original.pause_at.slice(0, 10)}T${draft.end}`;
+        }
+        setValue(merged);
         setEnabled(true);
       })
       .catch((cause: unknown) => {
@@ -214,7 +277,15 @@ function RunWindowDialog({
       if (updated.id === currentTaskId) {
         onCurrentTaskSaved?.(updated);
       }
-      toast.success(updated.queued ? "暂停时间已保存，任务已加入执行队列" : "暂停时间已保存，任务已继续执行");
+      toast.success(
+        updated.run_window_status === "scheduled"
+          ? "定时任务已保存，等待自动启动"
+          : updated.queued
+            ? "定时任务已保存，任务已加入执行队列"
+            : enabled
+              ? "自动暂停时间已保存，任务已继续执行"
+              : "定时限制已移除，任务已继续执行",
+      );
       onClose();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "保存运行窗口失败");
@@ -232,9 +303,9 @@ function RunWindowDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>确认任务运行窗口</DialogTitle>
+          <DialogTitle>设置任务定时计划</DialogTitle>
           <DialogDescription>
-            保存后任务会直接继续执行，每天到设定时间暂停渗透测试；已登记漏洞的报告会继续撰写并补全。
+            指定日期自动启动一次，到暂停时间后任务改为暂停；暂停后仍会继续完善已有漏洞报告。
           </DialogDescription>
         </DialogHeader>
         {!request.taskId && (
@@ -260,20 +331,20 @@ function RunWindowDialog({
             <div className="font-medium text-sm">
               #{task.id} {task.name || task.description}
             </div>
-            <p className="text-muted-foreground text-sm">原暂停时间 {runWindowText(task.run_window)}</p>
+            <p className="text-muted-foreground text-sm">原定时安排 {runWindowText(task.run_window)}</p>
             {task.run_window && (
               <Label>
                 <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />{" "}
-                设置渗透测试暂停时间
+                设置任务定时计划
               </Label>
             )}
             {enabled && (
               <>
                 <TaskRunWindowFields value={value} onChange={setValue} />
-                <p className="text-muted-foreground text-sm">到暂停时间后停止渗透测试；修改暂停时间后任务直接继续执行。</p>
+                <p className="text-muted-foreground text-sm">自动暂停后任务进入暂停状态；已登记漏洞的报告会继续撰写并补全。</p>
               </>
             )}
-            <p className="text-muted-foreground text-sm">新暂停时间 {runWindowText(enabled ? value : undefined)}</p>
+            <p className="text-muted-foreground text-sm">新定时安排 {runWindowText(enabled ? value : undefined)}</p>
           </div>
         )}
         {loading && <p className="text-muted-foreground text-sm">正在读取窗口配置…</p>}
@@ -288,7 +359,16 @@ function RunWindowDialog({
           </Button>
           <Button
             onClick={() => void save()}
-            disabled={!task || loading || saving || (enabled && (!value.end || !value.time_zone))}
+            disabled={
+              !task ||
+              loading ||
+              saving ||
+              (enabled &&
+                (!value.time_zone ||
+                  (value.end === undefined && (!value.start_at || !value.pause_at)) ||
+                  (value.end === undefined && Boolean(value.start_at && value.pause_at && value.pause_at <= value.start_at)) ||
+                  (value.end !== undefined && Boolean(!value.end || value.start_at || value.pause_at))))
+            }
           >
             确认保存
           </Button>
