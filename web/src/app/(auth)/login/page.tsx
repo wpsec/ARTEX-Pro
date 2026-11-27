@@ -13,6 +13,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { auth } from "@/lib/auth";
+import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
+
+const termsVersion = "v1.1";
+const acceptedTermsKey = "artex_login_terms_version";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -53,11 +57,21 @@ export default function LoginPage() {
     api
       .authStatus()
       .then(({ initialized }) => {
-        if (!initialized) router.replace("/setup");
+        if (!initialized) {
+          router.replace("/setup");
+          return;
+        }
+        setAgreed(getLocalStorageValue(acceptedTermsKey) === termsVersion);
       })
       .catch(() => setError("无法连接到后端服务"))
       .finally(() => setChecking(false));
   }, [router]);
+
+  function updateTermsAgreement(accepted: boolean) {
+    setAgreed(accepted);
+    setLocalStorageValue(acceptedTermsKey, accepted ? termsVersion : "");
+    if (accepted) setError("");
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -133,7 +147,7 @@ export default function LoginPage() {
               <Checkbox
                 id="agree-terms"
                 checked={agreed}
-                onCheckedChange={(v) => setAgreed(v === true)}
+                onCheckedChange={(value) => updateTermsAgreement(value === true)}
                 className="mt-0.5"
               />
               <Label htmlFor="agree-terms" className="text-sm font-normal leading-relaxed text-muted-foreground">
@@ -164,7 +178,7 @@ export default function LoginPage() {
             <div className="space-y-0.5">
               <DialogTitle className="text-base">ARTEX-Pro 使用须知</DialogTitle>
               <p className="text-xs text-muted-foreground">
-                版本 v1.1 · 更新日期 2026-11-12 · 请在登录前完整阅读以下内容
+                版本 {termsVersion} · 更新日期 2026-11-12 · 请在登录前完整阅读以下内容
               </p>
             </div>
           </DialogHeader>
@@ -289,14 +303,7 @@ export default function LoginPage() {
               {readToEnd ? "您已浏览全部条款" : "请将条款滚动至底部后再确认"}
             </p>
             <DialogClose asChild>
-              <Button
-                type="button"
-                disabled={!readToEnd}
-                onClick={() => {
-                  setAgreed(true);
-                  setError("");
-                }}
-              >
+              <Button type="button" disabled={!readToEnd} onClick={() => updateTermsAgreement(true)}>
                 我已阅读并确认使用须知
               </Button>
             </DialogClose>

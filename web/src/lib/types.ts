@@ -4,6 +4,13 @@
 export type TaskStatus = "created" | "queued" | "running" | "paused" | "done" | "failed" | "timeout";
 export type EngineMode = "exploring" | "paused" | "stalled" | "idle";
 
+export interface TaskRunWindow {
+  start_at?: string;
+  pause_at?: string;
+  end?: string;
+  time_zone: string;
+}
+
 export interface Task {
   id: string;
   name?: string; // 可选任务名称;空/缺省=未命名,展示时回退到描述
@@ -21,6 +28,12 @@ export interface Task {
   last_activity_unix?: number; // unix seconds of the last activity (0/undef if none)
   paused?: boolean;
   queued?: boolean;
+  run_window?: TaskRunWindow;
+  run_window_revision?: number;
+  run_window_status?: "scheduled" | "approved" | "closed" | "pausing";
+  run_window_next_at?: string;
+  deadline_at?: string;
+  report_status?: "writing" | "complete";
   active?: boolean;
   in_flight?: number;
   findings?: { critical: number; high: number; medium: number; low: number }; // 已登记漏洞数(按严重度分档)
@@ -508,6 +521,8 @@ export interface Finding {
   report?: string; // 详细报告(Markdown);仅详情接口返回,列表为空
   delivery_report?: string;
   delivery_report_cvss_vector?: string;
+  delivery_report_evidence_version?: number;
+  delivery_report_current_evidence_version?: number;
   delivery_report_stale?: boolean;
   intent_id?: string;
   param_id?: string;

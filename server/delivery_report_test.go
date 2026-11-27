@@ -349,6 +349,9 @@ func TestFindingDeliveryReportIsolationAndEvidenceVersion(t *testing.T) {
 		t.Fatalf("save inherited report: status=%d", code)
 	}
 	ownerSaved := get(ownerID)
+	if ownerSaved.HasDetailedReport {
+		t.Fatal("saving a delivery report alone must not mark the detailed report saved")
+	}
 	if owner := ownerSaved; stripDeliveryTrafficEvidence(owner.Content) != ownerContent || !owner.Exists {
 		t.Fatalf("owner report was not persisted independently: %+v", owner)
 	}
@@ -443,6 +446,36 @@ VALUES(?,?,?,?,?)`, id, requestHead, responseHead, []byte(requestBody), []byte(r
 	}
 }
 
+func TestGeneratedDeliveryReportStoresReadableNarrative(t *testing.T) {
+	s, finding, _ := trafficEvidenceServer(t)
+	const vector = "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
+	const ledgerNote = "复核分组记在台账的蓝色标签下。"
+	const detailed = "## 详细报告\n\n两次返回逐字节相同（seq 5–11）。\n" + ledgerNote
+	const fieldMarker = "<!-- artex:developer-report-fields-v1 -->\n"
+	const descriptionTail = "\n已确认影响：其他部门的目录名称可见。\n触发位置：文档中心的预览页，日常操作是打开文档预览。"
+	const markedFacts = "<!-- artex:developer-test-facts-v1 -->\n测试角色：普通账号。\n预期行为：列表仅显示当前部门的记录。\n实际结果：显示了其他部门的目录。\n未验证范围：现有记录无法确认响应包含用户列表。"
+	const repair = fieldMarker + "修复措施：服务端按当前用户权限限制可见目录。\n修复后验收：无权限时应拒绝访问。"
+	withFields := func(phenomenon, note string) string {
+		report := deliveryReportFixture(fieldMarker+"漏洞现象："+phenomenon+descriptionTail+note, vector)
+		report = strings.Replace(report, "操作、失败尝试和影响边界未记录。", markedFacts+note, 1)
+		return strings.Replace(report, "现有材料不足以定位具体实现，需结合源码确认修复位置。", repair+note, 1)
+	}
+	delivery := withFields("普通账号看到其他部门的目录（seq 5–11）。", "\n"+ledgerNote)
+	workflowCall(t, context.Background(), s.toolUpdateFindingReport(), map[string]any{
+		"finding_id": finding.NodeID, "report": detailed, "delivery_report": delivery,
+		"cvss_vector": vector, "evidence_version": 0,
+	}, false)
+	record, err := s.m.pg.GetFinding(finding.FindingID)
+	if err != nil || record == nil || record.TaskID == nil || record.Report != detailed {
+		t.Fatalf("unexpected detailed report state: %v", err)
+	}
+	saved, err := s.m.pg.GetFindingDeliveryReport(*record.TaskID, finding.FindingID)
+	want := withFields("普通账号看到其他部门的目录。", "")
+	if err != nil || saved == nil || !saved.Exists || !saved.HasDetailedReport || stripDeliveryTrafficEvidence(saved.Content) != want {
+		t.Fatalf("generated report did not save its readable narrative: %v", err)
+	}
+}
+
 func deliveryReportFixture(description, vector string) string {
 	return fmt.Sprintf(`# 测试系统-模块 /test 测试缺陷：测试结果
 
@@ -503,5 +536,6 @@ type FindingDeliveryReport struct {
 	Content                string `json:"content"`
 	EvidenceVersion        int64  `json:"evidence_version"`
 	CurrentEvidenceVersion int64  `json:"current_evidence_version"`
+	HasDetailedReport      bool   `json:"has_detailed_report"`
 	Exists                 bool   `json:"exists"`
 }

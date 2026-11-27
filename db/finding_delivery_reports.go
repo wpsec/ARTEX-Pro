@@ -14,6 +14,7 @@ type FindingDeliveryReport struct {
 	CVSSVector             string     `json:"cvss_vector"`
 	EvidenceVersion        int64      `json:"evidence_version"`
 	CurrentEvidenceVersion int64      `json:"current_evidence_version"`
+	HasDetailedReport      bool       `json:"has_detailed_report"`
 	Exists                 bool       `json:"exists"`
 	UpdatedAt              *time.Time `json:"updated_at,omitempty"`
 }
@@ -67,13 +68,13 @@ ORDER BY f.created_at, f.id`, before)
 func (d *DB) GetFindingDeliveryReport(taskID, findingID int64) (*FindingDeliveryReport, error) {
 	out := &FindingDeliveryReport{TaskID: taskID, FindingID: findingID}
 	var updatedAt sql.NullTime
-	err := d.QueryRow(`SELECT f.evidence_version,
+	err := d.QueryRow(`SELECT f.evidence_version, NULLIF(btrim(COALESCE(f.report,'')), '') IS NOT NULL,
        COALESCE(r.content,''), COALESCE(r.cvss_vector,''),
        COALESCE(r.evidence_version,0), r.updated_at
 FROM findings f
 LEFT JOIN finding_delivery_reports r ON r.finding_id=f.id AND r.task_id=$1
 WHERE f.id=$2`, taskID, findingID).Scan(
-		&out.CurrentEvidenceVersion, &out.Content, &out.CVSSVector, &out.EvidenceVersion, &updatedAt)
+		&out.CurrentEvidenceVersion, &out.HasDetailedReport, &out.Content, &out.CVSSVector, &out.EvidenceVersion, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -145,4 +146,21 @@ ON CONFLICT(task_id,finding_id) DO UPDATE SET
 		return err
 	})
 	return n, err
+}
+
+// IncompleteFindingReportsForExploration avoids loading list-wide metrics for a single task.
+func (d *DB) IncompleteFindingReportsForExploration(explorationID int64) (int, error) {
+	var incomplete int
+	err := d.QueryRow(`SELECT COUNT(*)
+FROM findings f
+JOIN tasks t ON t.id=f.task_id AND t.deleted_at IS NULL
+LEFT JOIN finding_delivery_reports r ON r.task_id=f.task_id AND r.finding_id=f.id
+WHERE t.exploration_id=$1
+  AND (
+      NULLIF(btrim(COALESCE(f.report,'')), '') IS NULL
+      OR f.report_evidence_version IS DISTINCT FROM f.evidence_version
+      OR NULLIF(btrim(COALESCE(r.content,'')), '') IS NULL
+      OR r.evidence_version IS DISTINCT FROM f.evidence_version
+  )`, explorationID).Scan(&incomplete)
+	return incomplete, err
 }

@@ -37,6 +37,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useTaskRunWindowDialog } from "@/components/task-run-window";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -385,9 +386,11 @@ function DraftChat({
   }, [agentKey, agents]);
 
   const agent = agents.find((a) => a.key === agentKey);
+  const windowDialog = useTaskRunWindowDialog();
 
   async function send() {
     const msg = input.trim();
+    if (windowDialog.intercept(msg, () => setInput(""))) return;
     if (!msg || !agentKey || sending) return;
     setSending(true);
     try {
@@ -454,13 +457,21 @@ function DraftChat({
         {agent?.description && <p className="text-muted-foreground max-w-md text-xs">{agent.description}</p>}
       </div>
 
+      {windowDialog.dialog}
       <Composer
         value={input}
         onChange={setInput}
         onSend={send}
         disabled={sending || uploading || !agentKey}
         placeholder="输入消息，@ 引用记录，Enter 发送"
-        leftSlot={agentPicker}
+        leftSlot={
+          <>
+            {agentPicker}
+            <Button size="sm" variant="ghost" onClick={windowDialog.open}>
+              运行窗口
+            </Button>
+          </>
+        }
         onPickFiles={pickFiles}
         uploading={uploading}
       />
@@ -495,6 +506,7 @@ function ChatView({
   onConvUpdated: () => void;
 }) {
   const approvalFocus = useApprovalFocus({ conversationId: conv.id });
+  const windowDialog = useTaskRunWindowDialog();
   const [messages, setMessages] = React.useState<Activity[]>([]);
   const [running, setRunning] = React.useState(false);
   const [input, setInput] = React.useState(initial?.input ?? "");
@@ -725,6 +737,7 @@ function ChatView({
   async function send() {
     const msg = input.trim();
     const atts = attachments;
+    if (windowDialog.intercept(msg, () => setInput(""))) return;
     if (side.handleCommand(msg, () => setInput(""))) return;
     if ((!msg && atts.length === 0) || sending || running) return;
     setSending(true);
@@ -810,12 +823,18 @@ function ChatView({
         </div>
       </ScrollArea>
 
+      {windowDialog.dialog}
       <Composer
         value={input}
         onChange={setInput}
         onSend={send}
         disabled={running || sending}
         allowBtw
+        leftSlot={
+          <Button size="sm" variant="ghost" onClick={windowDialog.open}>
+            运行窗口
+          </Button>
+        }
         placeholder={running ? "Agent 正在回复，可输入 /btw 提问…" : "输入消息，@ 引用记录，Enter 发送"}
         running={running}
         onStop={stop}

@@ -321,7 +321,7 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"平台生成标题、含完整向量、分数和等级的 CVSS 4.0 评分行、五节标题和原始报文附件",
 		"只返回这个 JSON 对象",
 		`{"cvss_vector":"","description":"","attack_chain":"","test_process":"","burp_reproduction":"","remediation":""}`,
-		"description 用短句写问题、成立条件、观察结果和评分依据",
+		"description 用短句写问题、权限条件、实际结果和已确认的影响",
 		"test_process 第一行必须为“测试时间：<test_time_hint>”",
 		"burp_reproduction 对 HTTP 场景附最小必要请求包",
 		"不得声称已通过 Burp 发送或验证",
@@ -357,7 +357,8 @@ func TestDeliveryReportCompletionSystemIncludesEvidenceGuardrails(t *testing.T) 
 		"材料没有 METHOD/path 时，代码块仍给出带占位符的请求行",
 		"任何真实 Authorization、Cookie、Token、会话标识或个人数据都改成用途明确的占位符",
 		"结果用自然语言说明业务状态，不得只写状态码/响应长度缩写或变量名",
-		"避免测试脚本内部说法和难懂缩写",
+		"把字节数、逐字节比较、内部序号、脚本阶段名称和具体文件属主留在测试台账",
+		"简述测试角色、预期行为和实际结果",
 		"正文以 800 字为参考预算",
 		"无身份、真假条件等独立对照放在独立分支，不接在主流程之后造成因果暗示",
 		"除第一行根节点外，攻击链代码块中每个非空行都必须以“├─”或“└─”开始",
@@ -428,6 +429,37 @@ func TestDeliveryAttackChainGroupIndentationAccountsForTreeGuides(t *testing.T) 
 	}, "\n") + "\n```"
 	if got := ensureDeliveryAttackChainTextFence(input); got != want {
 		t.Fatalf("normalized group indentation=%q, want %q", got, want)
+	}
+}
+
+func TestDeliveryReportDraftKeepsOnlyMarkedTestFacts(t *testing.T) {
+	marker := agent.DeliveryReportFieldsMarker
+	raw, err := json.Marshal(deliveryReportDraft{
+		Description:      marker + "\n漏洞现象：部门成员看到了其他部门的目录。\n已确认影响：其他部门的目录名称可见。\n内部版本为金色标签。",
+		Remediation:      marker + "\n修复措施：服务端按部门限制可见的目录。\n修复后验收：无权限时应拒绝访问。\n内部版本为金色标签。",
+		BurpReproduction: "Burp 不适用。",
+		AttackChain:      "目录预览\n└─ 显示了其他部门的目录。",
+		TestProcess: "测试时间：未记录\n<!-- artex:developer-test-facts-v1 -->\n" +
+			"测试角色：部门成员。\n预期行为：仅显示本部门目录。\n实际结果：显示了其他部门目录。\n内部复核由蓝色标签归档。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := parseDeliveryReportDraft(
+		llm.Message{Content: []llm.ContentBlock{llm.TextBlock(string(raw))}},
+		"end_turn", llm.Usage{}, map[string]string{"evidence_transport": "non-http", "synthetic": "true"}, 0,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(draft.TestProcess, "实际结果：显示了其他部门目录。") || strings.Contains(draft.TestProcess, "蓝色标签") {
+		t.Fatalf("unexpected structured draft test process: %q", draft.TestProcess)
+	}
+	if !strings.Contains(draft.Description, "测试范围：离线合成场景，未测试真实目标。") || strings.Contains(draft.Description, "金色标签") {
+		t.Fatalf("unexpected structured draft description: %q", draft.Description)
+	}
+	if !strings.Contains(draft.Remediation, "修复后验收：无权限时应拒绝访问。") || strings.Contains(draft.Remediation, "金色标签") {
+		t.Fatalf("unexpected structured draft remediation: %q", draft.Remediation)
 	}
 }
 
@@ -515,7 +547,7 @@ func TestDeliveryReportDraftKeepsRatingRationaleInDescriptionAndSanitizesSynthet
 	}
 }
 
-func TestDeliveryReportDraftRestoresBurpSectionAndRedactsEvidencePacket(t *testing.T) {
+func TestDeliveryReportDraftRestoresBurpSectionAndKeepsEvidencePacketUnredacted(t *testing.T) {
 	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N"
 	message, err := json.Marshal(deliveryReportDraft{
 		CVSSVector:  vector,
@@ -550,8 +582,8 @@ func TestDeliveryReportDraftRestoresBurpSectionAndRedactsEvidencePacket(t *testi
 	if strings.Contains(burpSection, "Burp 不适用") {
 		t.Fatalf("HTTP report was incorrectly marked not applicable: %s", burpSection)
 	}
-	if strings.Contains(burpSection, "session-secret") || strings.Contains(burpSection, "cookie-secret") || strings.Contains(burpSection, `"secret"`) {
-		t.Fatalf("sensitive values leaked into the Burp request packet: %s", burpSection)
+	if !strings.Contains(burpSection, "session-secret") || !strings.Contains(burpSection, "cookie-secret") || !strings.Contains(burpSection, `"secret"`) {
+		t.Fatalf("captured authentication or body values were not retained in the Burp request packet: %s", burpSection)
 	}
 }
 
@@ -623,19 +655,14 @@ func TestDeliveryReportDraftAddsEvidenceRequestWhenModelOmitsPacket(t *testing.T
 	for _, expected := range []string{
 		"请求包供渗透测试工程师在授权目标中导入 Burp Repeater",
 		"不代表已通过 Burp 发送或验证",
-		"POST /api/jobs/job-a/types?access_token=%5BREDACTED%5D HTTP/1.1",
-		"Authorization: [REDACTED]",
-		"Cookie: [REDACTED]",
-		`"token":"[REDACTED]"`,
-		"Content-Length: 22",
+		"POST /api/jobs/job-a/types?access_token=query-secret HTTP/1.1",
+		"Authorization: Bearer session-secret",
+		"Cookie: sid=cookie-secret",
+		`{"token":"secret"}`,
+		"Content-Length: 18",
 	} {
 		if !strings.Contains(burpSection, expected) {
 			t.Fatalf("Burp subsection is missing %q: %s", expected, burpSection)
-		}
-	}
-	for _, secret := range []string{"query-secret", "session-secret", "cookie-secret", `"secret"`} {
-		if strings.Contains(burpSection, secret) {
-			t.Fatalf("Burp packet leaked %q: %s", secret, burpSection)
 		}
 	}
 }
@@ -677,8 +704,8 @@ func TestDeliveryBurpEvidenceRequestKeepsEvalPacketsSeparate(t *testing.T) {
 	if strings.Contains(got, "GET /api/jobs/job-a HTTP/1.1") || strings.Contains(got, "### 修改后查询") {
 		t.Fatalf("extracted request contains neighboring evidence: %q", got)
 	}
-	if strings.Contains(got, `"secret"`) || !strings.Contains(got, `"token":"[REDACTED]"`) {
-		t.Fatalf("extracted request was not redacted: %q", got)
+	if !strings.Contains(got, `"secret"`) || strings.Contains(got, "[REDACTED]") {
+		t.Fatalf("extracted request did not preserve the captured body: %q", got)
 	}
 }
 
@@ -868,7 +895,7 @@ func TestDeliveryReportDraftRemovesLegacySubheadings(t *testing.T) {
 		CVSSVector:  vector,
 		Description: "普通用户可修改作业。定级依据：现有材料显示配置已变化。",
 		Remediation: "服务端校验作业归属。",
-		TestProcess: "测试时间：2026-11-01 10:00:00（北京时间）\n步骤。### 发现过程与攻击思路：重放修改请求。### 失败尝试与未验证项：没有记录失败尝试。",
+		TestProcess: "测试时间：2026-11-01 10:00:00（北京时间）\n步骤。### 发现过程与攻击思路：普通账号的变更被保存（seq 5–11）。### 失败尝试与未验证项：文件详情的响应（0 字节），内容未验证。",
 		AttackChain: "普通用户\n└─ POST /api/jobs/job-a/types\n   └─ 配置改变",
 	})
 	if err != nil {
@@ -896,6 +923,11 @@ func TestDeliveryReportDraftRemovesLegacySubheadings(t *testing.T) {
 	}
 	if strings.Contains(draft.TestProcess, "发现过程与攻击思路") || strings.Contains(draft.TestProcess, "失败尝试与未验证项") {
 		t.Fatalf("legacy test-process headings were not removed: %q", draft.TestProcess)
+	}
+	if strings.Contains(draft.TestProcess, "seq 5") ||
+		!strings.Contains(draft.TestProcess, "普通账号的变更被保存。") ||
+		!strings.Contains(draft.TestProcess, "文件详情的响应（没有内容），内容未验证。") {
+		t.Fatalf("draft didn't retain its reading-level results and limitations: %q", draft.TestProcess)
 	}
 	report := strings.Join([]string{
 		"# 测试系统 作业越权",

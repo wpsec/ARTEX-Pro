@@ -61,6 +61,12 @@ type TaskDTO struct {
 	ArchiveBlockedBy   string             `json:"archive_blocked_by_task_id,omitempty"`
 	CompanyIDs         []int64            `json:"company_ids"`
 	CoverageEnabled    bool               `json:"coverage_enabled"` // 资产覆盖度功能开关(创建时定)
+	RunWindow          *db.TaskRunWindow  `json:"run_window,omitempty"`
+	RunWindowRevision  int64              `json:"run_window_revision"`
+	RunWindowStatus    string             `json:"run_window_status,omitempty"`
+	RunWindowNextAt    string             `json:"run_window_next_at,omitempty"`
+	DeadlineAt         string             `json:"deadline_at,omitempty"`
+	ReportStatus       string             `json:"report_status,omitempty"` // writing | complete; scheduled pause only
 }
 
 // FindingSeverityDTO 是任务列表里按严重度分档的漏洞计数（严重/高/中/低）。
@@ -109,6 +115,21 @@ func taskDTO(t *Task, status string) TaskDTO {
 		sourceIDs = append(sourceIDs, i64s(id))
 	}
 	profileIDs := append(make([]int64, 0, len(llmState.ProfileIDs)), llmState.ProfileIDs...)
+	window := t.windowSnapshot()
+	var windowStatus, nextAt string
+	if window.policy != nil && !isTerminalStatus(lifecycle.Status) {
+		now := time.Now()
+		switch {
+		case window.waitingToStart(now):
+			windowStatus = "scheduled"
+			nextAt = rfc3339(window.startsAt)
+		case window.allowed(now):
+			windowStatus = "approved"
+			nextAt = rfc3339(window.nextEvent(now))
+		default:
+			windowStatus = "closed"
+		}
+	}
 	return TaskDTO{
 		ID:                 t.ID,
 		ExplorationID:      t.ExpID,
@@ -134,6 +155,11 @@ func taskDTO(t *Task, status string) TaskDTO {
 		SourceTaskIDs:      sourceIDs,
 		CompanyIDs:         lifecycle.CompanyIDs,
 		CoverageEnabled:    t.CoverageEnabled,
+		RunWindow:          window.policy,
+		RunWindowRevision:  window.revision,
+		RunWindowStatus:    windowStatus,
+		RunWindowNextAt:    nextAt,
+		DeadlineAt:         completedRFC(lifecycle.DeadlineAt),
 	}
 }
 
@@ -313,18 +339,20 @@ type FindingDTO struct {
 	EvidenceQuotes        []db.FindingEvidenceQuote  `json:"evidence_quotes"`
 	Counterevidence       string                     `json:"counterevidence"`
 
-	ID                       string `json:"id"`
-	FindingID                string `json:"finding_id,omitempty"` // standalone findings-table id — the handle for status updates
-	VulnClass                string `json:"vulnclass"`
-	Name                     string `json:"name,omitempty"` // 漏洞名称;为空时前端回退展示 vulnclass
-	Severity                 string `json:"severity"`       // critical | high | medium | low
-	Status                   string `json:"status"`         // pending | in_progress | confirmed | resolved | fixed | false_positive | ignored | duplicate | risk_accepted
-	Summary                  string `json:"summary"`
-	Evidence                 string `json:"evidence"`
-	Report                   string `json:"report,omitempty"` // 详细报告(Markdown);仅详情接口返回,列表为空
-	DeliveryReport           string `json:"delivery_report,omitempty"`
-	DeliveryReportCVSSVector string `json:"delivery_report_cvss_vector,omitempty"`
-	DeliveryReportStale      bool   `json:"delivery_report_stale,omitempty"`
+	ID                                   string `json:"id"`
+	FindingID                            string `json:"finding_id,omitempty"` // standalone findings-table id — the handle for status updates
+	VulnClass                            string `json:"vulnclass"`
+	Name                                 string `json:"name,omitempty"` // 漏洞名称;为空时前端回退展示 vulnclass
+	Severity                             string `json:"severity"`       // critical | high | medium | low
+	Status                               string `json:"status"`         // pending | in_progress | confirmed | resolved | fixed | false_positive | ignored | duplicate | risk_accepted
+	Summary                              string `json:"summary"`
+	Evidence                             string `json:"evidence"`
+	Report                               string `json:"report,omitempty"` // 详细报告(Markdown);仅详情接口返回,列表为空
+	DeliveryReport                       string `json:"delivery_report,omitempty"`
+	DeliveryReportCVSSVector             string `json:"delivery_report_cvss_vector,omitempty"`
+	DeliveryReportEvidenceVersion        *int64 `json:"delivery_report_evidence_version,omitempty"`
+	DeliveryReportCurrentEvidenceVersion *int64 `json:"delivery_report_current_evidence_version,omitempty"`
+	DeliveryReportStale                  bool   `json:"delivery_report_stale,omitempty"`
 
 	IntentID        string            `json:"intent_id,omitempty"`
 	ParamID         string            `json:"param_id,omitempty"`

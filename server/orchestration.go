@@ -533,7 +533,8 @@ func (s *Server) toolUpdateFindingReport() actool.CoreTool {
 				if lookupErr != nil {
 					return actool.Errorf(lookupErr.Error()), nil
 				}
-				deliveryReport, appendErr := s.appendDeliveryTrafficEvidence(ctx, findingID, *a.EvidenceVersion, a.DeliveryReport)
+				narrative := normalizeDeliveryNarrative(a.DeliveryReport, false)
+				deliveryReport, appendErr := s.appendDeliveryTrafficEvidence(ctx, findingID, *a.EvidenceVersion, narrative)
 				if appendErr != nil {
 					return actool.Errorf("附加完整 HTTP 流量证据失败：" + appendErr.Error()), nil
 				}
@@ -633,10 +634,15 @@ func (s *Server) seedOrchestrationTools() {
 	s.upgradeReporterDeliveryTemplateV34() // 明确合成范围并整理 Burp 请求与攻击链
 	s.upgradeReporterDeliveryTemplateV35() // 固定攻击链分组节点，避免出现第二个根
 	s.upgradeReporterDeliveryTemplateV36() // 避免把合成文件称为真实敏感资产
-	s.upgradeReporterDeliveryTemplateV37() // 固定交付报告六项结构并提供 Burp 复现请求包
-	s.upgradeReporterTriggerMessage()      // 老库触发消息同步报告版式与链路图规范
-	s.upgradeReporterTriggerMessageV11()   // 移除触发消息中重复的报告写作规则
-	s.seedFindingTrafficTools()            // 增加可选证据参数及只读证据工具，保留用户配置
+	s.upgradeReporterDeliveryTemplateVersion("reporter_prompt_delivery_template_v37")
+	s.upgradeReporterDeliveryTemplateVersion("reporter_prompt_delivery_template_v38")
+	s.upgradeReporterDeliveryTemplateVersion("reporter_prompt_delivery_template_v39")
+	s.upgradeReporterDeliveryTemplateVersion("reporter_prompt_delivery_template_v40")
+	s.upgradeReporterDeliveryTemplateVersion("reporter_prompt_delivery_template_v41")
+	s.upgradeReporterDeliveryTemplateVersion("reporter_prompt_delivery_template_v42")
+	s.upgradeReporterTriggerMessage()    // 老库触发消息同步报告版式与链路图规范
+	s.upgradeReporterTriggerMessageV11() // 移除触发消息中重复的报告写作规则
+	s.seedFindingTrafficTools()          // 增加可选证据参数及只读证据工具，保留用户配置
 	s.seedFindingWorkflowTools()
 	// 注：pentest 的默认工具绑定无需迁移——BuiltinToolSeeds 在全新初始化时就把
 	// list_assets/insert_assets/report_finding/list_findings/list_companies 连同
@@ -835,6 +841,13 @@ func reporterPromptHashNeedsTemplateUpgrade(hash string) bool {
 	case "9d700f4f89005e55b28d163ce5eda116b5a0c81eb5d64c3563997a02ede09ae4": // v35 合成数据敏感资产边界默认提示词
 		return true
 	case "b283bbd9f8f2a3ff6c94711491b0c20ca84391ee1610cab43f749e09e6b4949b": // v36 六项交付报告结构升级前的默认提示词
+		return true
+	case "36b7edff884c1873973f4c07d1ad878dd4114934c29ba2c46f5a9297f2d9563a", // v37 默认提示词
+		"b7b3da341c0f231f1464a68611963ea7de25a722fc20c2d4fc2c42d6502bad4a", // v37 增补写作说明
+		"b1810d42660faea41acceac39b21c3fb7def52ddc34d0bcb2d792dec7e507d93", // v38 默认提示词
+		"cd554551fda6c64b19cc7b90394bd7cf1bfcb9baa185b5ffbb3ab2a8a2495ac6", // v39 默认提示词
+		"aafa25ea714783911df067197419e08a32e09ddb0d501d23c52d3e1a94722056", // v40 默认提示词
+		"fdbf9634694918660cd5bedb01707ebd1496b896c71843cbd4a5d2619023a05f": // v41 默认提示词
 		return true
 	default:
 		return false
@@ -1529,10 +1542,9 @@ func (s *Server) upgradeReporterDeliveryTemplateV36() {
 	}
 }
 
-func (s *Server) upgradeReporterDeliveryTemplateV37() {
-	const flag = "reporter_prompt_delivery_template_v37"
+func (s *Server) upgradeReporterDeliveryTemplateVersion(flag string) {
 	if value, _, err := s.m.pg.GetSetting(flag); err != nil {
-		log.Printf("[reporter] 读取六项交付报告模板迁移标记失败: %v", err)
+		log.Printf("[reporter] 读取交付报告模板迁移标记 %s 失败: %v", flag, err)
 		return
 	} else if value == "true" {
 		return
@@ -1551,14 +1563,17 @@ func (s *Server) upgradeReporterDeliveryTemplateV37() {
 		return
 	}
 	if reporterPromptNeedsTemplateUpgrade(current) {
-		if _, err := s.m.pg.ResetPromptToDefault(agentRow.ID, agent.ReporterDefaultPrompt); err != nil {
-			log.Printf("[reporter] 更新六项交付报告模板失败: %v", err)
+		updated, err := s.m.pg.UpgradePromptIfCurrent(agentRow.ID, current, agent.ReporterDefaultPrompt)
+		if err != nil {
+			log.Printf("[reporter] 更新默认交付报告模板失败: %v", err)
 			return
 		}
-		log.Printf("[reporter] 默认提示词已更新为六项交付报告结构")
+		if updated {
+			log.Printf("[reporter] 已更新默认交付报告模板")
+		}
 	}
 	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
-		log.Printf("[reporter] 保存六项交付报告模板迁移标记失败: %v", err)
+		log.Printf("[reporter] 保存交付报告模板迁移标记 %s 失败: %v", flag, err)
 	}
 }
 

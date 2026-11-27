@@ -59,7 +59,7 @@ AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 
 默认 Compose 部署只启动 ARTEX-Pro 和 PostgreSQL。OWASP ZAP 作为 ARTEX-Pro 容器内的进程运行，并通过内置 MCP 提供 Web 测试工具。
 
-项目版本记录在根目录的 `VERSION`，当前版本为 `0.3.18`，从原生 ARTEX `0.3.15` 接续。正式版页面显示 `artex-pro:0.3.18`；`artex-dev` 本地构建显示 `artex-pro-dev:0.3.18`。发布 `v0.3.18` 等语义版本 tag 时，GHCR 正式版镜像 `ghcr.io/wpsec/artex-pro` 会带有 `0.3.18`、`v0.3.18` 和 `latest` 标签。部署时可在 `.env` 中把 `ARTEX_TAG` 设为固定版本，避免跟随 `latest` 更新。
+项目版本记录在根目录的 `VERSION`，当前源码版本为 `0.3.19`，从原生 ARTEX `0.3.15` 接续。`artex-dev` 本地构建显示 `artex-pro-dev:0.3.19`。以 `v0.3.18` 为例，正式版页面显示 `artex-pro:0.3.18`，GHCR 正式版镜像 `ghcr.io/wpsec/artex-pro` 带有 `0.3.18`、`v0.3.18` 和 `latest` 标签。部署时可在 `.env` 中把 `ARTEX_TAG` 设为固定版本，避免跟随 `latest` 更新。
 
 需要 Docker Engine 和 Docker Compose。
 
@@ -72,6 +72,8 @@ AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 选择 Docker 安装。脚本会在本机 `.env` 中为 PostgreSQL 生成随机凭据，并设为仅当前用户可读写，然后拉取镜像并启动。`.env` 不要提交到仓库。LLM API Key 可以先留空，登录后再在系统设置中配置。
 
 首次启动完成后打开 **http://localhost:8787**，进入 `/setup` 设置管理员密码。
+
+登录页会在当前浏览器记住已确认的《使用须知》版本。须知更新后，登录时需重新确认。
 
 新建数据库首次启动时，流量捕获、Agent 自动绑定已核实流量、网络搜索和 planner/worker 操作约束注入默认开启；内置命令拦截规则也默认生效。默认搜索使用 DDGS，无需 API Key。已有数据库的设置不会因升级被覆盖，可在系统配置中调整。
 
@@ -154,6 +156,8 @@ ARTEX_VERSION="$version" docker compose -f docker-compose.yml -f docker-compose.
 可选：`ARTEX_LLM_PROVIDER` / `ARTEX_LLM_MODEL` / `ARTEX_LLM_BASE_URL` / `ARTEX_LLM_PROXY`。
 
 **并发**：每个任务的 work agent 数在「系统设置」里配置（默认 3）。
+
+任务可以设置每日运行时段，窗口结束后自动暂停，开放后由人工确认开始或继续。[任务运行窗口](docs/2026-11-26-任务运行窗口.md)
 
 **常用参数**：`./start.sh -addr :8787 -proxy :8788`（`-addr` 前端+API，`-proxy` 流量录制代理）。启动脚本会把参数原样透传给 `artex`。
 

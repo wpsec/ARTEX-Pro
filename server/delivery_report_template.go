@@ -2,11 +2,180 @@ package server
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/wpsec/ARTEX-local/agent"
 )
+
+var (
+	deliveryNarrativeAnnotation = regexp.MustCompile(`[（(]\s*(?:(?i:seq)\s*[:：]?\s*[0-9]+(?:\s*[-–—]\s*[0-9]+)?|[1-9][0-9]*\s*字节)\s*[）)]`)
+	deliveryEmptyContentNote    = regexp.MustCompile(`[（(]\s*0\s*字节\s*[）)]`)
+	deliveryNarrativeTerms      = strings.NewReplacer("逐字节完全相同", "完全相同", "逐字节相同", "完全相同", "上传腿", "上传步骤", "证据显示", "测试记录显示")
+	deliveryFieldLine           = regexp.MustCompile(`^(?:[-*+]\s+)?(?:\*\*)?([^：:*]+)(?:\*\*)?[：:](?:\*\*)?\s*(.*)$`)
+)
+
+type deliveryField struct {
+	label   string
+	missing string
+}
+
+var (
+	deliveryDescriptionFields = []deliveryField{{"漏洞现象", "待核实。"}, {"已确认影响", "待核实。"}, {"触发位置", "待核实。"}, {label: "测试范围"}}
+	deliveryRemediationFields = []deliveryField{{"修复措施", "待补充。"}, {"修复后验收", "待核实。"}}
+	deliveryTestProcessFields = []deliveryField{{"测试角色", "待核实。"}, {"预期行为", "待核实。"}, {"实际结果", "待核实。"}, {label: "未验证范围"}}
+)
+
+func normalizeStructuredDeliveryTestProcess(body string) string {
+	timeLine, remaining, found := strings.Cut(strings.TrimLeft(body, " \t\r\n"), "\n")
+	if !found || !(strings.HasPrefix(timeLine, "测试时间：") || strings.HasPrefix(timeLine, "测试时间:")) {
+		return body
+	}
+	return normalizeStructuredDeliveryFields(body, strings.TrimLeft(remaining, " \t\r\n"), agent.DeliveryReportTestFactsMarker, deliveryTestProcessFields)
+}
+
+func normalizeStructuredDeliveryFields(body, marked, expectedMarker string, orderedFields []deliveryField) string {
+	marker, facts, _ := strings.Cut(marked, "\n")
+	if strings.TrimSpace(marker) != expectedMarker {
+		return body
+	}
+
+	separator := "\n"
+	if strings.HasSuffix(marker, "\r") {
+		separator = "\r\n"
+	}
+	fields := make(map[string][]string)
+	var label string
+	var parts []string
+	flush := func() {
+		if label != "" && len(parts) > 0 {
+			fields[label] = append(fields[label], strings.Join(parts, separator+"  "))
+		}
+		label, parts = "", nil
+	}
+	nextOffset := 0
+	walkDeliveryMarkdown(facts, func(line string, offset int) {
+		if offset != nextOffset {
+			flush()
+		}
+		if newline := strings.IndexByte(facts[offset:], '\n'); newline >= 0 {
+			nextOffset = offset + newline + 1
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && strings.HasPrefix(line, "  ") && label != "" {
+			parts = append(parts, trimmed)
+			return
+		}
+		flush()
+		if match := deliveryFieldLine.FindStringSubmatch(trimmed); len(match) > 0 {
+			label = strings.TrimSpace(match[1])
+			if value := strings.TrimSpace(match[2]); value != "" {
+				parts = append(parts, value)
+			}
+		}
+	})
+	flush()
+	lines := []string{expectedMarker}
+	for _, field := range orderedFields {
+		values := fields[field.label]
+		if len(values) == 0 && field.missing != "" {
+			values = []string{field.missing}
+		}
+		for _, value := range values {
+			lines = append(lines, field.label+"："+value)
+		}
+	}
+	return body[:len(body)-len(marked)] + strings.Join(lines, separator) + body[len(strings.TrimRight(body, " \t\r\n")):]
+}
+
+func normalizeStructuredDeliveryDescription(body string) string {
+	return normalizeStructuredDeliveryFields(body, strings.TrimLeft(body, " \t\r\n"), agent.DeliveryReportFieldsMarker, deliveryDescriptionFields)
+}
+
+func normalizeStructuredDeliveryRemediation(body string) string {
+	return normalizeStructuredDeliveryFields(body, strings.TrimLeft(body, " \t\r\n"), agent.DeliveryReportFieldsMarker, deliveryRemediationFields)
+}
+
+func normalizeGeneratedDeliverySection(report, heading string, normalize func(string) string) string {
+	start, end := -1, len(report)
+	walkDeliveryMarkdown(report, func(line string, offset int) {
+		if end != len(report) {
+			return
+		}
+		level, name := deliveryMarkdownHeading(line)
+		if start < 0 {
+			if level == 2 && name == heading {
+				start = len(report)
+				if newline := strings.IndexByte(report[offset:], '\n'); newline >= 0 {
+					start = offset + newline + 1
+				}
+			}
+			return
+		}
+		if level == 1 || level == 2 || strings.TrimSpace(line) == deliveryEvidenceAppendixMarker {
+			end = offset
+		}
+	})
+	if start < 0 {
+		return report
+	}
+	return report[:start] + normalize(report[start:end]) + report[end:]
+}
+
+// The same cleanup runs on structured drafts and before reports are stored.
+// It skips code and raw records and preserves the meaning of an empty body.
+func normalizeDeliveryNarrative(report string, inNarrative bool) string {
+	if !inNarrative && strings.Contains(report, agent.DeliveryReportTestFactsMarker) {
+		report = normalizeGeneratedDeliverySection(report, "测试过程", normalizeStructuredDeliveryTestProcess)
+	}
+	if !inNarrative && strings.Contains(report, agent.DeliveryReportFieldsMarker) {
+		report = normalizeGeneratedDeliverySection(report, "描述", normalizeStructuredDeliveryDescription)
+		report = normalizeGeneratedDeliverySection(report, "修复建议", normalizeStructuredDeliveryRemediation)
+	}
+	var normalized strings.Builder
+	nextOffset := 0
+	inAppendix := false
+	walkDeliveryMarkdown(report, func(line string, offset int) {
+		if inAppendix {
+			return
+		}
+		if strings.TrimSpace(line) == deliveryEvidenceAppendixMarker {
+			inAppendix = true
+			return
+		}
+		level, heading := deliveryMarkdownHeading(line)
+		switch level {
+		case 1:
+			inNarrative = false
+		case 2:
+			inNarrative = heading == "描述" || heading == "漏洞描述" || heading == "测试过程" || heading == "修复" || heading == "修复建议"
+		default:
+			if level > 2 && (heading == "Burp 复现" || heading == "Burp 复现包" ||
+				heading == "POC 脚本（Python）" || heading == "复现脚本（Python）") {
+				inNarrative = false
+			}
+		}
+		if level > 0 || !inNarrative || strings.ContainsRune(line, '`') || strings.HasPrefix(strings.TrimSpace(line), ">") ||
+			!strings.HasPrefix(report[offset:], line) {
+			return
+		}
+		readable := deliveryEmptyContentNote.ReplaceAllString(line, "（没有内容）")
+		readable = deliveryNarrativeAnnotation.ReplaceAllString(readable, "")
+		readable = deliveryNarrativeTerms.Replace(readable)
+		if readable == line || strings.TrimSpace(readable) == "" {
+			return
+		}
+		normalized.WriteString(report[nextOffset:offset])
+		normalized.WriteString(readable)
+		nextOffset = offset + len(line)
+	})
+	if nextOffset == 0 {
+		return report
+	}
+	normalized.WriteString(report[nextOffset:])
+	return normalized.String()
+}
 
 // Fenced packets and HTML comments can contain Markdown-looking evidence. They
 // must not satisfy report headings or be mistaken for our generated appendix.

@@ -10,6 +10,78 @@ import (
 	"github.com/wpsec/ARTEX-local/agent"
 )
 
+func TestNormalizeDeliveryNarrativePreservesFactsAndOriginalRecords(t *testing.T) {
+	report := strings.Join([]string{
+		"# 测试样本",
+		"## 描述",
+		"普通账号能看到其他部门的目录（seq 5–11）。",
+		"## 测试过程",
+		"证据显示两次返回的列表逐字节相同（87 字节）。文件详情的响应（0 字节），内容未验证。",
+		"~~~text",
+		"逐字节相同（seq 5–11）",
+		"~~~",
+		"## 攻击链路",
+		"逐字节相同（seq 5–11）",
+		"## 修复建议",
+		"服务端返回目录前先核对访问权限。",
+		deliveryEvidenceAppendixMarker,
+		"## 测试过程",
+		"逐字节相同（seq 5–11）",
+	}, "\r\n")
+	want := strings.Replace(
+		report,
+		"普通账号能看到其他部门的目录（seq 5–11）。",
+		"普通账号能看到其他部门的目录。",
+		1,
+	)
+	want = strings.Replace(
+		want,
+		"证据显示两次返回的列表逐字节相同（87 字节）。文件详情的响应（0 字节），内容未验证。",
+		"测试记录显示两次返回的列表完全相同。文件详情的响应（没有内容），内容未验证。",
+		1,
+	)
+	if got := normalizeDeliveryNarrative(report, false); got != want {
+		t.Fatalf("unexpected normalized report:\n%s", got)
+	}
+	if got := normalizeDeliveryNarrative("内容逐字节相同（seq 5–11）。", true); got != "内容完全相同。" {
+		t.Fatalf("structured draft field normalized to %q", got)
+	}
+}
+
+func TestNormalizeStructuredDeliveryTestProcess(t *testing.T) {
+	const time = "测试时间：未记录"
+	marker := agent.DeliveryReportTestFactsMarker
+	legacy := time + "\n其他部门的文件内容未验证。"
+	insideFence := time + "\n~~~text\n" + marker + "\n~~~"
+	for _, input := range []string{legacy, insideFence} {
+		if got := normalizeStructuredDeliveryTestProcess(input); got != input {
+			t.Fatalf("changed an unmarked test process: %q", got)
+		}
+	}
+	input := strings.Join([]string{
+		"", time, "", marker,
+		"未验证范围：现有记录无法确认响应包含用户列表。",
+		"  文件预览也未核实。",
+		"- **测试角色：** 部门成员。",
+		"复核分组记在台账的蓝色标签下。",
+		"~~~text", "实际结果：示例台账内容。", "~~~", "", "",
+	}, "\r\n")
+	want := strings.Join([]string{
+		"", time, "", marker,
+		"测试角色：部门成员。",
+		"预期行为：待核实。",
+		"实际结果：待核实。",
+		"未验证范围：现有记录无法确认响应包含用户列表。",
+		"  文件预览也未核实。", "", "",
+	}, "\r\n")
+	if got := normalizeStructuredDeliveryTestProcess(input); got != want {
+		t.Fatalf("unexpected marked test facts:\n%s", got)
+	}
+	if got := normalizeStructuredDeliveryTestProcess(want); got != want {
+		t.Fatalf("normalization changed existing continuations:\n%s", got)
+	}
+}
+
 func TestValidateDeliveryReportTemplate(t *testing.T) {
 	vector := "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
 	valid := deliveryReportFixture("重复请求的实际影响未验证。", vector)
@@ -162,6 +234,26 @@ func TestReporterTemplateUpgradeRecognizesDefaultsAndPreservesEdits(t *testing.T
 	const previousV36Hash = "b283bbd9f8f2a3ff6c94711491b0c20ca84391ee1610cab43f749e09e6b4949b"
 	if !reporterPromptHashNeedsTemplateUpgrade(previousV36Hash) {
 		t.Fatal("previous v36 stock prompt would retain the old delivery report structure")
+	}
+	for _, previous := range []string{
+		"36b7edff884c1873973f4c07d1ad878dd4114934c29ba2c46f5a9297f2d9563a",
+		"b7b3da341c0f231f1464a68611963ea7de25a722fc20c2d4fc2c42d6502bad4a",
+	} {
+		if !reporterPromptHashNeedsTemplateUpgrade(previous) {
+			t.Fatal("previous v37 stock prompt would keep writing test chronology into the delivery report")
+		}
+	}
+	if !reporterPromptHashNeedsTemplateUpgrade("b1810d42660faea41acceac39b21c3fb7def52ddc34d0bcb2d792dec7e507d93") {
+		t.Fatal("previous v38 stock prompt would miss the location guidance")
+	}
+	if !reporterPromptHashNeedsTemplateUpgrade("cd554551fda6c64b19cc7b90394bd7cf1bfcb9baa185b5ffbb3ab2a8a2495ac6") {
+		t.Fatal("previous v39 stock prompt would miss the business chain and remediation guidance")
+	}
+	if !reporterPromptHashNeedsTemplateUpgrade("aafa25ea714783911df067197419e08a32e09ddb0d501d23c52d3e1a94722056") {
+		t.Fatal("previous v40 stock prompt would use unstructured test prose")
+	}
+	if !reporterPromptHashNeedsTemplateUpgrade("fdbf9634694918660cd5bedb01707ebd1496b896c71843cbd4a5d2619023a05f") {
+		t.Fatal("previous v41 stock prompt would use unstructured description and remediation")
 	}
 	if reporterPromptNeedsTemplateUpgrade(agent.ReporterDefaultPrompt) {
 		t.Fatal("current stock prompt should not be migrated")

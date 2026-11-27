@@ -371,16 +371,33 @@ func (e *Engine) execContextFor(parent context.Context, taskID string) context.C
 	if c := e.execCtx[taskID]; c != nil && c.Err() == nil {
 		return c
 	}
-	c, cancel := context.WithCancelCause(parent)
+	bounded, done := parent, func() {}
+	if e.m != nil {
+		if task, ok := e.m.Task(taskID); ok {
+			bounded, done = task.windowSnapshot().context(parent)
+		}
+	}
+	c, cancel := context.WithCancelCause(bounded)
 	e.execCtx[taskID] = c
-	e.execCancel[taskID] = cancel
+	e.execCancel[taskID] = func(cause error) {
+		cancel(cause)
+		done()
+	}
 	return c
 }
 
-// IsPaused reports whether a task is user-paused.
+// IsPaused reports whether task execution is currently held.
 func (e *Engine) IsPaused(taskID string) bool {
 	v, ok := e.paused.Load(taskID)
-	return ok && v.(bool)
+	if ok && v.(bool) {
+		return true
+	}
+	if e.m != nil {
+		if task, exists := e.m.Task(taskID); exists {
+			return !task.windowSnapshot().allowed(time.Now())
+		}
+	}
+	return false
 }
 
 // Started reports whether the engine loops are running for a task.
@@ -887,6 +904,9 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		if open, err := t.Store.HasOpenGoal(); err == nil && !open {
 			t.drainTriggers() // 丢弃累积的 done/finding 触发，避免 goalless 长会话里无界增长
 			if active, err := t.Store.HasActiveIntent(); err == nil && !active {
+				if e.IsPaused(t.ID) || e.IsDeleting(t.ID) {
+					return
+				}
 				// frontier 抽干且无在跑意图 → 收尾。用 Guarded 版做 CAS，避免踩到并发的
 				// pause/delete/超时收尾的状态转换。
 				if won, err := e.m.SetTaskStatusGuarded(t.ID, "done"); err != nil {
@@ -925,15 +945,21 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		case err != nil && ectx.Err() == nil:
 			log.Printf("[planner] task %s 规划出错: %v", t.ID, err)
 		case met:
+			if err != nil || ectx.Err() != nil || e.IsPaused(t.ID) || e.IsDeleting(t.ID) {
+				log.Printf("[planner] task %s 已暂停或取消，忽略本轮目标达成结果", t.ID)
+				return
+			}
 			log.Printf("[planner] task %s 判定目标达成: %s", t.ID, reason)
 			// 所有目标达成 → 持久化任务状态为 done（前端 DTO 会优先展示该终态）。
-			if err := e.m.SetTaskStatus(t.ID, "done"); err != nil {
+			won, err := e.m.SetTaskStatusGuarded(t.ID, "done")
+			if err != nil {
 				log.Printf("[planner] task %s 标记完成落库失败: %v", t.ID, err)
+			} else if won {
+				// 任务已判完成 → 立刻取消在跑的 worker：它们手头的意图跑出来也没意义了。
+				// 下一轮 worker 循环撞终态门就不再领新意图;被取消的这批走下方"任务已完成"分支
+				// 归为 stopped(而非 blocked)。
+				e.cancelExec(t.ID, agent.AbortGoalMet)
 			}
-			// 任务已判完成 → 立刻取消在跑的 worker：它们手头的意图跑出来也没意义了。
-			// 下一轮 worker 循环撞终态门就不再领新意图;被取消的这批走下方"任务已完成"分支
-			// 归为 stopped(而非 blocked)。
-			e.cancelExec(t.ID, agent.AbortGoalMet)
 		default:
 			log.Printf("[planner] task %s 规划完成", t.ID)
 		}
@@ -1260,7 +1286,7 @@ func taskExecutionPaused(cause error) bool {
 	}
 	switch abort.Code {
 	case "paused_by_user", "paused_by_orchestrator", "paused_on_reload", "paused_race_guard",
-		"queued_for_admission", "llm_unavailable_queued", "task_deleted":
+		"queued_for_admission", "llm_unavailable_queued", "task_deleted", "run_window_closed":
 		return true
 	default:
 		return false

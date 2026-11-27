@@ -1,8 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-import { randomUUID } from "node:crypto";
-
 import { authCookieName } from "../src/lib/auth-cookie";
+import { randomUUID } from "node:crypto";
 
 const longSkillName = `regression-skill-${"long-name-".repeat(16)}`;
 const task = {
@@ -64,6 +63,31 @@ test.beforeEach(async ({ context, page, baseURL }) => {
       body: JSON.stringify(response),
     });
   });
+});
+
+test("layout preferences use Chinese labels and retain their selection", async ({ page }) => {
+  await page.goto("/function/tasks");
+  const preferencesButton = page.getByRole("button", { name: "界面偏好" });
+  await preferencesButton.click();
+  const preferences = page.getByRole("dialog").filter({ hasText: "自定义主题、字体和页面布局。" });
+  await expect(preferences.getByRole("radio")).toHaveText([
+    "浅色",
+    "深色",
+    "跟随系统",
+    "居中",
+    "全宽",
+    "固定在顶部",
+    "随页面滚动",
+    "内嵌",
+    "标准",
+    "悬浮",
+    "仅保留图标",
+    "完全收起",
+  ]);
+  await preferences.getByRole("radio", { name: "居中" }).click();
+  await page.reload();
+  await preferencesButton.click();
+  await expect(preferences.getByRole("radio", { name: "居中" })).toBeChecked();
 });
 
 test("long unused Skill names wrap inside the overview column", async ({ page }) => {

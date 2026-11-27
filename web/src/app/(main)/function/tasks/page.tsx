@@ -48,6 +48,7 @@ import { AssetInterceptRulesEditor } from "@/components/asset-intercept-rules-ed
 import { StatusBadge } from "@/components/status-badge";
 import { TablePagination } from "@/components/table-pagination";
 import { TaskLLMProfileChain } from "@/components/task-llm-profile-chain";
+import { defaultRunWindow, TaskRunWindowFields, TaskRunWindowStatus } from "@/components/task-run-window";
 import { TaskTemplateControls } from "@/components/task-template-controls";
 import {
   AlertDialog,
@@ -1209,7 +1210,8 @@ const TaskRow = React.memo(function TaskRow({
         {task.goal}
       </TableCell>
       <TableCell>
-        <StatusBadge domain="task" value={task.status} dot />
+        {task.run_window_status !== "pausing" && <StatusBadge domain="task" value={task.status} dot />}
+        <TaskRunWindowStatus task={task} />
       </TableCell>
       <TableCell className="text-muted-foreground text-center text-xs tabular-nums">
         {typeof task.goals_total === "number" && task.goals_total > 0 ? (
@@ -1441,14 +1443,16 @@ function TaskControlButton({
 }) {
   const [pending, setPending] = React.useState(false);
   const action = taskControlAction(task.status);
-  const label = action === "resume" ? "继续任务" : "暂停任务";
+  const windowPausing = task.run_window_status === "pausing";
+  const resumeLabel = "继续任务";
+  const label = action === "resume" ? resumeLabel : "暂停任务";
   return (
     <Button
       size="icon"
       variant="ghost"
       aria-label={label}
-      title={action ? label : "该状态不可暂停或继续"}
-      disabled={!action || pending}
+      title={windowPausing ? "渗透测试暂停中" : action ? label : "该状态不可暂停或继续"}
+      disabled={!action || pending || windowPausing}
       onClick={async () => {
         if (!action) return;
         setPending(true);
@@ -3096,6 +3100,8 @@ function CreateTaskSheet({
   const [llmProfileIDs, setLLMProfileIDs] = React.useState<string[]>([]);
   const [creating, setCreating] = React.useState(false);
   const [timeoutMin, setTimeoutMin] = React.useState(""); // 任务级超时(分钟);空/0 = 不限时
+  const [runWindowEnabled, setRunWindowEnabled] = React.useState(false);
+  const [runWindow, setRunWindow] = React.useState(defaultRunWindow);
   const [heartbeatMin, setHeartbeatMin] = React.useState("10"); // planner 心跳(分钟);默认10,下限10(与后端一致)
   const [seedFirstIntent, setSeedFirstIntent] = React.useState(false); // 创建时下发种子意图,worker 免等首轮 planner 直接开跑;默认关闭,走标准先规划再执行
   const [coverageEnabled, setCoverageEnabled] = React.useState(true); // 资产覆盖度功能;默认开。关闭=不计算/展示覆盖度、不累积范围、隐藏范围类工具(company 关联不受影响)
@@ -3150,11 +3156,18 @@ function CreateTaskSheet({
       toast.error(`最多关联 ${MAX_SOURCE_TASKS} 个来源任务`);
       return;
     }
+    if (
+      runWindowEnabled &&
+      (!runWindow.start_at || !runWindow.pause_at || !runWindow.time_zone || runWindow.pause_at <= runWindow.start_at)
+    ) {
+      toast.error("请填写有效时区，并确保自动暂停时间晚于自动启动时间");
+      return;
+    }
     setCreating(true);
     try {
       const timeoutSec = Math.max(0, Math.floor(Number(timeoutMin) || 0)) * 60;
       const heartbeatSec = Math.max(10, Math.floor(Number(heartbeatMin) || 10)) * 60; // 下限 10min，与后端归一一致
-      await api.createTask({
+      const created = await api.createTask({
         name: name.trim(),
         categoryId: categoryID,
         description: description.trim(),
@@ -3164,13 +3177,14 @@ function CreateTaskSheet({
         companyIds: companyIDs,
         timeoutSeconds: timeoutSec,
         seedFirstIntent,
+        runWindow: runWindowEnabled ? runWindow : undefined,
         planHeartbeatSeconds: heartbeatSec,
         coverageEnabled,
         interceptRules: interceptRules
           .map((r) => ({ ...r, pattern: r.pattern.trim() }))
           .filter((r) => r.pattern !== ""),
       });
-      toast.success("任务已创建");
+      toast.success(created.run_window_status === "scheduled" ? "定时任务已创建，等待自动启动" : "任务已创建");
       setName("");
       setCategoryID(undefined);
       setDescription("");
@@ -3180,6 +3194,8 @@ function CreateTaskSheet({
       setCompanyIDs([]);
       setLLMProfileIDs([]);
       setTimeoutMin("");
+      setRunWindowEnabled(false);
+      setRunWindow(defaultRunWindow());
       setHeartbeatMin("10");
       setSeedFirstIntent(false);
       setCoverageEnabled(true);
@@ -3340,6 +3356,25 @@ function CreateTaskSheet({
                 portalContainer={sheetContentRef}
               />
               <FieldDescription>按列表顺序故障转移；第一项为当前配置，仅在明确额度不足时切换下一项。</FieldDescription>
+            </Field>
+
+            <Field>
+              <Label htmlFor="enable-run-window" className="flex items-center gap-2">
+                <Checkbox
+                  id="enable-run-window"
+                  checked={runWindowEnabled}
+                  onCheckedChange={(value) => setRunWindowEnabled(value === true)}
+                />
+                设置定时任务
+              </Label>
+              {runWindowEnabled && (
+                <>
+                  <TaskRunWindowFields value={runWindow} onChange={setRunWindow} />
+                  <FieldDescription>
+                    指定年月日自动启动和自动暂停，各执行一次。暂停后任务进入暂停状态，已有漏洞报告会继续补全。
+                  </FieldDescription>
+                </>
+              )}
             </Field>
 
             {/* 高级参数默认折叠:超时/心跳/首个意图,展开才占空间,常用路径保持清爽。 */}

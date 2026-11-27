@@ -10,6 +10,7 @@ import { toast } from "sonner";
 
 import { StatusBadge } from "@/components/status-badge";
 import { TaskLLMProfileChain } from "@/components/task-llm-profile-chain";
+import { TaskRunWindowStatus } from "@/components/task-run-window";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -249,30 +250,32 @@ function TaskDetailInner() {
     };
   }, [id]);
 
-  const taskLoadInFlight = React.useRef<string | null>(null);
+  const taskLoadInFlight = React.useRef<{ id: string } | null>(null);
   const load = React.useCallback(() => {
-    if (taskLoadInFlight.current === id) return;
-    taskLoadInFlight.current = id;
+    if (taskLoadInFlight.current?.id === id) return;
+    const request = { id };
+    taskLoadInFlight.current = request;
     Promise.all([api.task(id), api.stats(id).catch(() => null)])
       .then(([task, s]) => {
-        if (taskLoadInFlight.current !== id) return;
+        if (taskLoadInFlight.current !== request) return;
         const base = { ...task };
         const at = s?.active_task;
+        const waitingForScheduledStart = base.status === "created" && base.run_window_status === "scheduled";
         if (at) {
           base.in_flight = at.in_flight;
           base.goals_total = at.goals_total;
           base.goals_met = at.goals_met;
           base.engine_mode = s?.engine_mode ?? at.engine_mode;
-          base.paused = at.paused;
+          base.paused = waitingForScheduledStart ? false : at.paused;
         }
         setTask(base);
-        setPaused(at?.paused ?? base.paused ?? false);
+        setPaused(waitingForScheduledStart ? false : (at?.paused ?? base.paused ?? false));
       })
       .catch(() => {
         // Keep the last rendered task state during a transient poll failure.
       })
       .finally(() => {
-        if (taskLoadInFlight.current === id) {
+        if (taskLoadInFlight.current === request) {
           taskLoadInFlight.current = null;
           setLoaded(true);
         }
@@ -284,12 +287,37 @@ function TaskDetailInner() {
     return () => clearInterval(timer);
   }, [load]);
 
+  function applySavedRunWindow(updated: Task) {
+    if (updated.id !== id) return;
+    setTask((current) =>
+      current?.id === updated.id
+        ? {
+            ...current,
+            status: updated.status,
+            paused: updated.paused,
+            queued: updated.queued,
+            run_window: updated.run_window,
+            run_window_revision: updated.run_window_revision,
+            run_window_status: updated.run_window_status,
+            run_window_next_at: updated.run_window_next_at,
+            deadline_at: updated.deadline_at,
+          }
+        : current,
+    );
+    setPaused(updated.paused ?? false);
+    // An earlier poll may still carry the old window revision.
+    taskLoadInFlight.current = null;
+    load();
+  }
+
   async function togglePause() {
     if (task && ["done", "failed", "timeout"].includes(task.status)) return;
     const next = !paused;
     try {
       await api.controlTask(id, next ? "pause" : "resume");
       setPaused(next);
+      taskLoadInFlight.current = null;
+      load();
       toast.success(next ? "已暂停探索" : "已恢复探索");
     } catch (e) {
       toast.error("操作失败：" + (e as Error).message);
@@ -375,7 +403,9 @@ function TaskDetailInner() {
           </code>
           <Separator orientation="vertical" className="mx-1 hidden h-4 sm:block" />
           <TaskLLMControl task={task} profiles={profiles} onUpdated={load} />
-          <StatusBadge domain={terminal ? "task" : "engine"} value={terminal ? task.status : engineMode} dot />
+          {task.run_window_status !== "pausing" && (
+            <StatusBadge domain={terminal ? "task" : "engine"} value={terminal ? task.status : engineMode} dot />
+          )}
           {canArchive ? (
             <AlertDialog>
               <AlertDialogTrigger asChild>{archiveTrigger}</AlertDialogTrigger>
@@ -401,12 +431,18 @@ function TaskDetailInner() {
               <TooltipContent>{archiveDisabledReason}</TooltipContent>
             </Tooltip>
           )}
-          <Button size="sm" variant={controlVariant} onClick={togglePause} disabled={terminal}>
+          <Button
+            size="sm"
+            variant={controlVariant}
+            onClick={togglePause}
+            disabled={terminal || (paused && task.run_window_status === "pausing")}
+          >
             {controlIcon}
             {controlLabel}
           </Button>
         </div>
         <p className="truncate text-xs text-muted-foreground">{task.goal}</p>
+        <TaskRunWindowStatus task={task} />
         {/* Tabs */}
         <div className="no-scrollbar min-w-0 overflow-x-auto">
           <TabsList variant="default" className="min-w-max">
@@ -427,7 +463,7 @@ function TaskDetailInner() {
       {/* Tab content */}
       <div className="flex-1 p-4 lg:p-6">
         <TabsContent value="sessions" className="mt-0">
-          <SessionsTab taskId={id} />
+          <SessionsTab taskId={id} onTaskWindowSaved={applySavedRunWindow} />
         </TabsContent>
         <TabsContent value="overview" className="mt-0">
           <OverviewTab taskId={id} />
@@ -454,7 +490,7 @@ function TaskDetailInner() {
           <InterceptTab taskId={id} />
         </TabsContent>
         <TabsContent value="report" className="mt-0">
-          <ReportTab taskId={id} />
+          {task.id === id && <ReportTab key={id} task={task} />}
         </TabsContent>
       </div>
     </Tabs>

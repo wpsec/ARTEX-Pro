@@ -1299,11 +1299,12 @@ type FindingSeverityCounts struct{ Critical, High, Medium, Low int }
 
 // TaskListMetrics contains the aggregates rendered in task lists.
 type TaskListMetrics struct {
-	Tokens         TokenUsage
-	LastActivity   int64
-	Goals          GoalCounts
-	RunningIntents int                   // kind='intent' 且 state='running' 的条数，即运行中 Worker 数
-	Findings       FindingSeverityCounts // findings 表里该任务的漏洞数（按严重度分档）
+	Tokens                   TokenUsage
+	LastActivity             int64
+	Goals                    GoalCounts
+	RunningIntents           int                   // kind='intent' 且 state='running' 的条数，即运行中 Worker 数
+	Findings                 FindingSeverityCounts // findings 表里该任务的漏洞数（按严重度分档）
+	IncompleteFindingReports int
 }
 
 // TaskListMetricsAll returns list aggregates for every live task in one query.
@@ -1323,7 +1324,8 @@ func (d *DB) TaskListMetricsAll() (map[int64]TaskListMetrics, error) {
 		       COALESCE(finding_metrics.critical,0),
 		       COALESCE(finding_metrics.high,0),
 		       COALESCE(finding_metrics.medium,0),
-		       COALESCE(finding_metrics.low,0)
+		       COALESCE(finding_metrics.low,0),
+		       COALESCE(finding_metrics.incomplete_reports,0)
 		FROM tasks task
 		LEFT JOIN LATERAL (
 			SELECT SUM(input_tokens) AS input_tokens,
@@ -1352,12 +1354,19 @@ func (d *DB) TaskListMetricsAll() (map[int64]TaskListMetrics, error) {
 			WHERE exploration_id=task.exploration_id AND kind='intent' AND state='running'
 		) intent_metrics ON true
 		LEFT JOIN LATERAL (
-			SELECT COUNT(*) FILTER (WHERE severity='critical') AS critical,
-			       COUNT(*) FILTER (WHERE severity='high')     AS high,
-			       COUNT(*) FILTER (WHERE severity='medium')   AS medium,
-			       COUNT(*) FILTER (WHERE severity='low')      AS low
-			FROM findings
-			WHERE task_id=task.id
+			SELECT COUNT(*) FILTER (WHERE f.severity='critical') AS critical,
+			       COUNT(*) FILTER (WHERE f.severity='high')     AS high,
+			       COUNT(*) FILTER (WHERE f.severity='medium')   AS medium,
+			       COUNT(*) FILTER (WHERE f.severity='low')      AS low,
+			       COUNT(*) FILTER (WHERE
+			           NULLIF(btrim(COALESCE(f.report,'')), '') IS NULL
+			           OR f.report_evidence_version IS DISTINCT FROM f.evidence_version
+			           OR NULLIF(btrim(COALESCE(r.content,'')), '') IS NULL
+			           OR r.evidence_version IS DISTINCT FROM f.evidence_version
+			       ) AS incomplete_reports
+			FROM findings f
+			LEFT JOIN finding_delivery_reports r ON r.task_id=f.task_id AND r.finding_id=f.id
+			WHERE f.task_id=task.id
 		) finding_metrics ON true
 		WHERE task.deleted_at IS NULL`)
 	if err != nil {
@@ -1382,6 +1391,7 @@ func (d *DB) TaskListMetricsAll() (map[int64]TaskListMetrics, error) {
 			&metrics.Findings.High,
 			&metrics.Findings.Medium,
 			&metrics.Findings.Low,
+			&metrics.IncompleteFindingReports,
 		); err != nil {
 			return nil, err
 		}

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/wpsec/ARTEX-local/agent"
 	"github.com/wpsec/ARTEX-local/db"
@@ -34,6 +35,9 @@ func (s *Server) launchTask(t *Task, seedText string, seedFirstIntent bool) {
 		s.seedFirstIntent(t)
 	}
 	s.engine.decInflight(t.ID)
+	if t.windowSnapshot().waitingToStart(time.Now()) {
+		return
+	}
 	if _, err := s.admitTask(t, "bootstrap"); err != nil {
 		log.Printf("[concurrency] task %s 启动失败: %v", t.ID, err)
 	}
@@ -128,6 +132,8 @@ func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued
 	}
 	defer s.engine.decInflight(t.ID)
 	lifecycle := t.lifecycleSnapshot()
+	window := t.windowSnapshot()
+	now := time.Now()
 	if requirePaused {
 		if isTerminalStatus(lifecycle.Status) {
 			return false, fmt.Errorf("终态任务不能执行继续")
@@ -135,7 +141,41 @@ func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued
 		if !lifecycle.Paused {
 			return false, fmt.Errorf("仅已暂停的任务可以继续")
 		}
+		if window.waitingToStart(now) && lifecycle.Status == "created" {
+			if err := s.m.SetTaskPaused(t.ID, false); err != nil {
+				return false, err
+			}
+			s.engine.Resume(t)
+			return false, nil
+		}
+		if !window.allowed(now) {
+			window = t.rollExpiredRunWindowForward(now)
+		}
+		if window.policy != nil && !window.policy.IsDailyPause() && !window.stopsAt.IsZero() && !now.Before(window.stopsAt) {
+			if s.m.pg == nil {
+				return false, fmt.Errorf("管理后台数据源(PostgreSQL)未连接")
+			}
+			taskID, err := strconv.ParseInt(t.ID, 10, 64)
+			if err != nil {
+				return false, fmt.Errorf("无效任务 ID: %w", err)
+			}
+			s.m.taskStateMu.Lock()
+			revision, err := s.m.pg.ReplaceTaskRunWindow(taskID, window.revision, nil, true)
+			if err == nil {
+				t.replaceWindowPolicy(nil, revision)
+				window = t.windowSnapshot()
+			}
+			s.m.taskStateMu.Unlock()
+			if err != nil {
+				return false, fmt.Errorf("解除已结束的一次性定时安排失败: %w", err)
+			}
+		}
+		if !window.allowed(now) {
+			return false, window.blockedCause(now)
+		}
 		mode = s.resumeAdmissionMode(t)
+	} else if window.blocksAdmission(lifecycle, now) {
+		return false, window.blockedCause(now)
 	}
 	wasTerminal := isTerminalStatus(lifecycle.Status)
 	wasPaused := lifecycle.Paused || s.engine.IsPaused(t.ID)
@@ -217,7 +257,8 @@ func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued
 func (s *Server) hasReadyQueuedTask(excludeID string) bool {
 	for _, task := range s.m.List() {
 		lifecycle := task.lifecycleSnapshot()
-		if task.ID != excludeID && lifecycle.Queued && !lifecycle.Paused && !isTerminalStatus(lifecycle.Status) && s.engine.ReadyFor(task) {
+		if task.ID != excludeID && lifecycle.Queued && !lifecycle.Paused && !isTerminalStatus(lifecycle.Status) &&
+			task.windowSnapshot().allowed(time.Now()) && s.engine.ReadyFor(task) {
 			return true
 		}
 	}
@@ -225,6 +266,9 @@ func (s *Server) hasReadyQueuedTask(excludeID string) bool {
 }
 
 func (s *Server) startAdmittedTask(t *Task, mode string) {
+	if !t.windowSnapshot().allowed(time.Now()) {
+		return
+	}
 	if mode == "bootstrap" {
 		if !s.engine.beginTaskOperation(t.ID) {
 			return
@@ -325,7 +369,7 @@ func (s *Server) reconcileConcurrency() {
 		// Keep FIFO order, but do not consume a concurrency slot for a task
 		// whose explicit chain/global provider is unavailable. It will be retried
 		// after the user configures or resets its LLM chain.
-		if lifecycle.Paused || (enabled && !s.engine.ReadyFor(task)) {
+		if lifecycle.Paused || !task.windowSnapshot().allowed(time.Now()) || (enabled && !s.engine.ReadyFor(task)) {
 			continue
 		}
 		mode := lifecycle.QueueMode

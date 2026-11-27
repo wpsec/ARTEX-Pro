@@ -89,6 +89,7 @@ import type {
   TaskGoal,
   TaskLLMResolutions,
   TaskNode,
+  TaskRunWindow,
   TaskScopeRow,
   TaskTemplate,
   TokenTotal,
@@ -149,6 +150,38 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (r.status === 204) return undefined as T;
   return r.json();
+}
+
+async function downloadBinary(path: string, filename: string): Promise<void> {
+  if (MOCK) throw new Error("演示数据没有可下载的 Burp 流量包");
+  const token = getToken();
+  const response = await fetch(`/api${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (response.status === 401) {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+      clearAuthCookie(window.location.port);
+      window.location.href = "/login";
+    }
+    throw new Error("未授权");
+  }
+  if (!response.ok) {
+    let message = `下载失败：${response.status}`;
+    try {
+      const payload = (await response.json()) as { error?: unknown };
+      if (typeof payload.error === "string" && payload.error.trim()) message = payload.error.trim();
+    } catch {
+      // Non-JSON errors keep the status-based message.
+    }
+    throw new Error(message);
+  }
+  const objectURL = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement("a");
+  anchor.href = objectURL;
+  anchor.download = filename;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(objectURL), 30_000);
 }
 
 // sseUrl builds a URL for Server-Sent Events streams.
@@ -278,6 +311,7 @@ export const api = {
     planHeartbeatSeconds?: number;
     coverageEnabled?: boolean;
     interceptRules?: AssetInterceptRuleInput[];
+    runWindow?: TaskRunWindow;
   }) =>
     post<Task>("/tasks", {
       name: input.name ?? "",
@@ -292,6 +326,7 @@ export const api = {
       plan_heartbeat_seconds: input.planHeartbeatSeconds ?? 0, // 0 = 后端归一到默认 600(10min)
       coverage_enabled: input.coverageEnabled ?? true, // 默认开;false=关闭资产覆盖度功能
       intercept_rules: input.interceptRules ?? [], // 任务级资产拦截规则
+      run_window: input.runWindow,
     }),
   taskCategories: () => get<{ categories: TaskCategory[] }>("/task-categories").then((r) => arr(r.categories)),
   updateTask: (id: string, input: { name?: string; pinned?: boolean }) => patch<Task>(`/tasks/${id}`, input),
@@ -331,7 +366,11 @@ export const api = {
     }),
   deleteTask: (id: string, options: DeleteTaskOptions) => del<DeleteTaskResult>(`/tasks/${id}`, options),
   controlTask: (id: string, action: "pause" | "resume") =>
-    post<{ id: string; paused: boolean; queued: boolean; status: string }>(`/tasks/${id}/control`, { action }),
+    post<{ id: string; paused: boolean; queued: boolean; status: string }>(`/tasks/${encodeURIComponent(id)}/control`, {
+      action,
+    }),
+  updateTaskRunWindow: (id: string, revision: number, window: TaskRunWindow | null) =>
+    put<Task>(`/tasks/${encodeURIComponent(id)}/run-window`, { revision, window }),
   controlTasksBatch: (taskIds: string[], action: "pause" | "resume") =>
     post<{ items: BatchControlItem[] }>("/tasks/control/batch", { task_ids: taskIds, action }),
   taskArchives: (input?: { page?: number; size?: number; q?: string; state?: string }) => {
@@ -557,11 +596,11 @@ export const api = {
   // ---- exploration (per task) ----
   frontier: (task?: string) => get<TaskNode[]>(`/exploration/frontier${tq(task)}`).then(arr),
   findings: (task?: string) => get<Finding[]>(`/exploration/findings${tq(task)}`).then(arr),
-  findingsPage: (q: FindingQuery) => {
+  findingsPage: (q: FindingQuery, signal?: AbortSignal) => {
     const p = findingFilterParams(q);
     p.set("page", String(q.page));
     p.set("limit", String(q.pageSize));
-    return get<FindingsPage>(`/exploration/findings?${p.toString()}`);
+    return http<FindingsPage>(`/exploration/findings?${p.toString()}`, { signal });
   },
   findingGroups: (q: FindingQuery) => {
     const p = findingFilterParams(q);
@@ -610,6 +649,20 @@ export const api = {
   getFinding: (id: string, contextTaskId?: string) =>
     get<Finding>(
       `/exploration/findings/${id}${contextTaskId ? `?context_task=${encodeURIComponent(contextTaskId)}` : ""}`,
+    ),
+  findingDeliveryReport: (taskId: string, findingId: string, signal?: AbortSignal) =>
+    http<{
+      exists: boolean;
+      has_detailed_report?: boolean;
+      content: string;
+      cvss_vector: string;
+      evidence_version: number;
+      current_evidence_version: number;
+    }>(`/tasks/${encodeURIComponent(taskId)}/findings/${encodeURIComponent(findingId)}/delivery-report`, { signal }),
+  downloadFindingBurpPackage: (taskId: string, findingId: string) =>
+    downloadBinary(
+      `/tasks/${encodeURIComponent(taskId)}/findings/${encodeURIComponent(findingId)}/burp-package`,
+      `artex-finding-${findingId}-burp.zip`,
     ),
   findingTraffic: (id: string, contextTask?: string) =>
     get<FindingTraffic>(
@@ -843,8 +896,7 @@ export const api = {
   // 渠道是多实例资源（同一类型可配多个机器人、各有过滤规则），因此独立成组，
   // 不塞进扁平的 settings 键值里。
   notifyMeta: () => get<NotificationMeta>(`/notify/meta`),
-  notifyChannels: () =>
-    get<{ channels: NotificationChannel[] }>(`/notify/channels`).then((r) => arr(r.channels)),
+  notifyChannels: () => get<{ channels: NotificationChannel[] }>(`/notify/channels`).then((r) => arr(r.channels)),
   notifyCreateChannel: (payload: {
     name: string;
     kind: string;
