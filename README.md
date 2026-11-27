@@ -59,7 +59,7 @@ AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 
 默认 Compose 部署只启动 ARTEX-Pro 和 PostgreSQL。OWASP ZAP 作为 ARTEX-Pro 容器内的进程运行，并通过内置 MCP 提供 Web 测试工具。
 
-项目版本记录在根目录的 `VERSION`，当前版本为 `0.3.18`，从原生 ARTEX `0.3.15` 接续。正式版页面显示 `artex-pro:0.3.18`；`artex-dev` 本地构建显示 `artex-pro-dev:0.3.18`。发布 `v0.3.18` 等语义版本 tag 时，GHCR 正式版镜像 `ghcr.io/wpsec/artex-pro` 会带有 `0.3.18`、`v0.3.18` 和 `latest` 标签。部署时可在 `.env` 中把 `ARTEX_TAG` 设为固定版本，避免跟随 `latest` 更新。
+项目版本记录在根目录的 `VERSION`，当前源码版本为 `0.3.19`，从原生 ARTEX `0.3.15` 接续。`artex-dev` 本地构建显示 `artex-pro-dev:0.3.19`。以 `v0.3.18` 为例，正式版页面显示 `artex-pro:0.3.18`，GHCR 正式版镜像 `ghcr.io/wpsec/artex-pro` 带有 `0.3.18`、`v0.3.18` 和 `latest` 标签。部署时可在 `.env` 中把 `ARTEX_TAG` 设为固定版本，避免跟随 `latest` 更新。
 
 需要 Docker Engine 和 Docker Compose。
 
