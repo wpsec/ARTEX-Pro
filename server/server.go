@@ -55,6 +55,8 @@ type Server struct {
 	jwtKeyPath   string
 	authChangeMu sync.RWMutex
 
+	cyberspace *cyberspaceSearch
+
 	// concMu serializes concurrency-cap decisions (admission + reconcile) so a
 	// scheduler tick and an HTTP settings change / task creation can't both count
 	// free slots off the same snapshot and over-promote past the limit.
@@ -165,6 +167,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		profChatAgents: map[int64]*agent.ChatAgent{},
 		provByProfile:  map[int64]*provEntry{},
 		taskAgents:     map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1)}
+	s.cyberspace = newCyberspaceSearch(m.pg, dataDir)
 	if !m.registerServer(s) {
 		s.Close()
 		return s
@@ -894,6 +897,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/agents/{key}/prompt/preview", s.pgPreviewPrompt)
 	mux.HandleFunc("GET /api/agents/{key}/visibility", s.pgGetAgentVisibility)
 	mux.HandleFunc("PUT /api/agents/{key}/visibility", s.pgSetAgentVisibility)
+	mux.HandleFunc("GET /api/cyberspace-search/providers", s.listCyberspaceSearch)
+	mux.HandleFunc("PUT /api/cyberspace-search/providers/{provider}", s.saveCyberspaceSearch)
+	mux.HandleFunc("POST /api/cyberspace-search/test", s.testCyberspaceSearch)
+
 	// 内置工具目录（描述/参数默认值可改、按 agent 绑定；key 与 handler 在代码层）
 	mux.HandleFunc("GET /api/tools", s.pgListTools)
 	mux.HandleFunc("PUT /api/tools/{key}", s.pgUpdateTool)

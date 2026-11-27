@@ -23,6 +23,8 @@ import {
   Wrench,
 } from "lucide-react";
 
+import { CyberspaceSearchIcon } from "@/components/cyberspace-search-icon";
+
 export type NavBadge = "new" | "soon";
 
 export interface NavSubItem {
@@ -87,6 +89,12 @@ export const sidebarItems: NavGroup[] = [
       { id: "mcp", title: "MCP", url: "/system/mcp", icon: Plug },
       { id: "skills", title: "Skill", url: "/system/skills", icon: Sparkles },
       { id: "tools", title: "工具", url: "/system/tools", icon: Wrench },
+      {
+        id: "cyberspace-search",
+        title: "网络空间搜索引擎",
+        url: "/system/cyberspace-search",
+        icon: CyberspaceSearchIcon,
+      },
       { id: "notify", title: "通知推送", url: "/system/notify", icon: BellRing },
       { id: "intercept", title: "拦截规则", url: "/system/intercept", icon: ShieldAlert },
       { id: "asset-intercept", title: "资产拦截", url: "/system/intercept/assets", icon: Ban },

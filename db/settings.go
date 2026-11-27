@@ -43,6 +43,16 @@ ON CONFLICT (key) DO NOTHING`, key, value)
 	return n > 0, nil
 }
 
+// ReplaceSettingIfUnchanged preserves writes made since the caller read the setting.
+func (d *DB) ReplaceSettingIfUnchanged(key, previous, next string) (bool, error) {
+	res, err := d.Exec(`UPDATE settings SET value=$3, updated_at=now() WHERE key=$1 AND value=$2`, key, previous, next)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 // GetBool returns the boolean setting, or def when unset/unparseable.
 func (d *DB) GetBool(key string, def bool) bool {
 	v, ok, err := d.GetSetting(key)

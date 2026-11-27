@@ -28,6 +28,8 @@ import type {
   ConvTokenSummary,
   CoverageAssetRefs,
   CoverageGraphData,
+  CyberspaceSearchConfig,
+  CyberspaceSearchProvider,
   DailyTokenBucket,
   DeleteTaskOptions,
   DeleteTaskResult,
@@ -1155,6 +1157,13 @@ export const api = {
   getAgentVisibility: (key: string) => get<{ mcp: number[]; skill: string[] }>(`/agents/${key}/visibility`),
   setAgentVisibility: (key: string, mcp: number[], skill: string[]) =>
     put<{ ok: boolean }>(`/agents/${key}/visibility`, { mcp, skill }),
+
+  cyberspaceSearchProviders: () =>
+    get<{ providers: CyberspaceSearchProvider[] }>("/cyberspace-search/providers").then((r) => arr(r.providers)),
+  saveCyberspaceSearchProvider: (id: string, config: CyberspaceSearchConfig) =>
+    put<CyberspaceSearchProvider>(`/cyberspace-search/providers/${encodeURIComponent(id)}`, config),
+  testCyberspaceSearchProviders: () =>
+    post<{ providers: CyberspaceSearchProvider[] }>("/cyberspace-search/test").then((r) => arr(r.providers)),
 
   // ---- tools (内置工具目录) ----
   tools: () => get<{ tools: Tool[] }>("/tools").then((r) => arr(r.tools)),

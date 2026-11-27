@@ -930,6 +930,30 @@ export interface TrafficHost {
 }
 
 // ---- App settings (runtime toggles) ----
+export interface CyberspaceSearchProvider {
+  id: string;
+  name: string;
+  credential: string;
+  needs_account_id: boolean;
+  configured: boolean;
+  account_id_set: boolean;
+  enabled: boolean;
+  revision: number;
+  test?: {
+    status: "passed" | "failed" | "unverified";
+    reason?: string;
+    tested_at: string;
+  };
+}
+
+export interface CyberspaceSearchConfig {
+  revision: number;
+  enabled: boolean;
+  api_key?: string;
+  account_id?: string;
+  clear?: boolean;
+}
+
 export interface Settings {
   traffic_capture: boolean;
   agent_traffic_binding: boolean; // Agent 自动绑定流量证据；新部署默认开启，不影响人工绑定
