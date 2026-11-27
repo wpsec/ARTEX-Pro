@@ -147,3 +147,20 @@ ON CONFLICT(task_id,finding_id) DO UPDATE SET
 	})
 	return n, err
 }
+
+// IncompleteFindingReportsForExploration avoids loading list-wide metrics for a single task.
+func (d *DB) IncompleteFindingReportsForExploration(explorationID int64) (int, error) {
+	var incomplete int
+	err := d.QueryRow(`SELECT COUNT(*)
+FROM findings f
+JOIN tasks t ON t.id=f.task_id AND t.deleted_at IS NULL
+LEFT JOIN finding_delivery_reports r ON r.task_id=f.task_id AND r.finding_id=f.id
+WHERE t.exploration_id=$1
+  AND (
+      NULLIF(btrim(COALESCE(f.report,'')), '') IS NULL
+      OR f.report_evidence_version IS DISTINCT FROM f.evidence_version
+      OR NULLIF(btrim(COALESCE(r.content,'')), '') IS NULL
+      OR r.evidence_version IS DISTINCT FROM f.evidence_version
+  )`, explorationID).Scan(&incomplete)
+	return incomplete, err
+}

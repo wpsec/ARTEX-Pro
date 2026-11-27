@@ -85,6 +85,11 @@ const windowStatuses = {
   pausing: { label: "渗透测试暂停中", nextEvent: null },
 };
 
+const pausedReportStatuses = {
+  writing: "已暂停，报告正在撰写中",
+  complete: "已暂停，报告撰写完成",
+};
+
 function formatTime(value?: string, timeZone?: string) {
   if (!value) return null;
   try {
@@ -108,12 +113,16 @@ export function TaskRunWindowStatus({ task }: { task: Task }) {
   const status = task.run_window_status && windowStatuses[task.run_window_status];
   const next = status?.nextEvent ? formatTime(task.run_window_next_at, task.run_window.time_zone) : null;
   const deadline = formatTime(task.deadline_at, task.run_window.time_zone);
+  const reportStatus =
+    task.status === "paused" && task.run_window_status === "closed" && task.report_status
+      ? pausedReportStatuses[task.report_status]
+      : null;
   return (
     <div className="space-y-0.5 text-muted-foreground text-xs">
       <div>定时安排 {runWindowText(task.run_window)}</div>
       {status && (
         <div>
-          {status.label}
+          {reportStatus ?? status.label}
           {next && ` · ${status.nextEvent} ${next}`}
         </div>
       )}

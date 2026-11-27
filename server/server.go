@@ -1080,14 +1080,17 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		active = t.ID
 	}
 	list := s.m.List()
-	metrics, _ := s.m.PG().TaskListMetricsAll()
+	metrics, metricsErr := s.m.PG().TaskListMetricsAll()
 	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
 	dtos := make([]TaskDTO, 0, len(list))
 	for _, t := range list {
 		dto := taskDTO(t, s.resolvedTaskStatus(t))
 		s.fillWindowDrainState(&dto, t)
 		applyTaskArchiveBlocker(&dto, archiveBlockers)
-		metric := metrics[t.ExpID]
+		metric, hasMetrics := metrics[t.ExpID]
+		if metricsErr == nil && hasMetrics && dto.Status == "paused" && dto.RunWindowStatus == "closed" {
+			setPausedTaskReportStatus(&dto, metric.IncompleteFindingReports)
+		}
 		dto.Tokens = tokenTotalDTO(metric.Tokens)
 		// prefer the live in-memory heartbeat (fresher) and fall back to the
 		// persisted max activity time (survives restarts) for run-duration display.
@@ -1107,6 +1110,17 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		dtos = append(dtos, dto)
 	}
 	writeJSON(w, 200, map[string]any{"tasks": dtos, "active": active})
+}
+
+func setPausedTaskReportStatus(dto *TaskDTO, incompleteReports int) {
+	if dto.Status != "paused" || dto.RunWindowStatus != "closed" {
+		return
+	}
+	if incompleteReports > 0 {
+		dto.ReportStatus = "writing"
+		return
+	}
+	dto.ReportStatus = "complete"
 }
 
 func (s *Server) resolvedTaskStatus(t *Task) string {
@@ -1807,6 +1821,14 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 	}
 	dto := taskDTO(t, s.resolvedTaskStatus(t))
 	s.fillWindowDrainState(&dto, t)
+	if dto.Status == "paused" && dto.RunWindowStatus == "closed" {
+		incompleteReports, err := s.m.PG().IncompleteFindingReportsForExploration(t.ExpID)
+		if err != nil {
+			log.Printf("[tasks] report status task=%s: %v", t.ID, err)
+		} else {
+			setPausedTaskReportStatus(&dto, incompleteReports)
+		}
+	}
 	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
 	applyTaskArchiveBlocker(&dto, archiveBlockers)
 	writeJSON(w, 200, dto)

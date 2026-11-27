@@ -66,6 +66,7 @@ type TaskDTO struct {
 	RunWindowStatus    string             `json:"run_window_status,omitempty"`
 	RunWindowNextAt    string             `json:"run_window_next_at,omitempty"`
 	DeadlineAt         string             `json:"deadline_at,omitempty"`
+	ReportStatus       string             `json:"report_status,omitempty"` // writing | complete; scheduled pause only
 }
 
 // FindingSeverityDTO 是任务列表里按严重度分档的漏洞计数（严重/高/中/低）。

@@ -33,6 +33,7 @@ export interface Task {
   run_window_status?: "scheduled" | "approved" | "closed" | "pausing";
   run_window_next_at?: string;
   deadline_at?: string;
+  report_status?: "writing" | "complete";
   active?: boolean;
   in_flight?: number;
   findings?: { critical: number; high: number; medium: number; low: number }; // 已登记漏洞数(按严重度分档)
