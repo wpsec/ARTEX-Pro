@@ -55,11 +55,50 @@ AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 [AegisHook 的审批详情组件](https://github.com/RuoJi6/AegisHook/blob/main/web/src/components/CallDetail.vue)，沿用 ARTEX-Pro 的组件和主题：
 
 
+## 首次部署：Release 二进制（无需容器）
+
+正式版 [GitHub Release](https://github.com/wpsec/ARTEX-Pro/releases/latest) 提供 Linux `amd64` / `arm64`、macOS `amd64` / `arm64` 和 Windows `amd64` 压缩包。包内包含 ARTEX-Pro 可执行文件、内嵌前端、启动脚本和 `skills/`，无需安装 Go、Node.js 或 Docker。下载对应系统和架构的压缩包后解压即可，文件名格式为 `artex-<版本>-<系统>-<架构>.zip`；发布页同时提供 `SHA256SUMS` 供校验。
+
+二进制部署需要单独准备可访问的 PostgreSQL 数据库。Release 压缩包不包含 Docker 镜像内的 PostgreSQL、OWASP ZAP、ffuf 和 sqlmap；需要这些随镜像提供的服务或工具时，请使用下方的 Docker Compose 部署方式。
+
+### 1. 配置数据库
+
+复制包内示例配置，并编辑 `database` 指向已有的 PostgreSQL。也可以通过环境变量 `ARTEX_PG_DSN` 提供连接串；环境变量优先于配置文件。示例配置中的 `skill_dir` 是镜像路径，独立部署时请删除该字段以使用包内 `skills/`，或改成解压目录下的 `./skills`。妥善保管含数据库凭据的 `config.json`，不要提交到仓库。
+
+```bash
+# Linux / macOS
+cp config.example.json config.json
+```
+
+Windows PowerShell：
+
+```powershell
+Copy-Item config.example.json config.json
+```
+
+### 2. 启动并设置管理员密码
+
+使用随包提供的启动脚本，以便程序在应用更新后自动重新启动：
+
+```bash
+# Linux / macOS
+./start.sh -addr :8787 -proxy 127.0.0.1:8788
+```
+
+```powershell
+# Windows
+.\start.bat -addr :8787 -proxy 127.0.0.1:8788
+```
+
+打开 **http://localhost:8787/setup** 设置管理员密码。程序默认把本地数据保存在可执行文件旁的 `data/` 目录；需要改位置时可通过 `-data` 指定。LLM 配置可登录后在系统设置中完成。
+
+`-proxy` 指定流量录制代理监听地址，默认使用 `127.0.0.1:8788`；不需要该代理时可传入空字符串关闭。
+
 ## 首次部署：Docker
 
 默认 Compose 部署只启动 ARTEX-Pro 和 PostgreSQL。OWASP ZAP 作为 ARTEX-Pro 容器内的进程运行，并通过内置 MCP 提供 Web 测试工具。
 
-项目版本记录在根目录的 `VERSION`，当前源码版本为 `0.3.19`，从原生 ARTEX `0.3.15` 接续。`artex-dev` 本地构建显示 `artex-pro-dev:0.3.19`。以 `v0.3.18` 为例，正式版页面显示 `artex-pro:0.3.18`，GHCR 正式版镜像 `ghcr.io/wpsec/artex-pro` 带有 `0.3.18`、`v0.3.18` 和 `latest` 标签。部署时可在 `.env` 中把 `ARTEX_TAG` 设为固定版本，避免跟随 `latest` 更新。
+项目版本记录在根目录的 `VERSION`，当前源码版本为 `0.3.19`，从原生 ARTEX `0.3.15` 接续。`artex-dev` 本地构建显示 `artex-pro-dev:0.3.19`。`v0.3.19` 正式版镜像为 `ghcr.io/wpsec/artex-pro`，带有 `0.3.19`、`v0.3.19` 和 `latest` 标签。部署时可在 `.env` 中把 `ARTEX_TAG` 设为固定版本，避免跟随 `latest` 更新。
 
 需要 Docker Engine 和 Docker Compose。
 
