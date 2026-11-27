@@ -401,7 +401,7 @@ test("finding detail previews and copies the same developer report", async ({ co
   await expect(page.getByText("列表通过相关接口返回了其他用户的记录。")).toBeVisible();
   await expect(page.getByText("触发位置：记录中心 → 我的记录，日常操作是打开记录列表。")).toBeVisible();
   await expect(page.getByText("预期只显示当前账号的记录。测试记录显示，列表里出现了其他账号的记录。")).toBeVisible();
-  await expect(page.getByText(/以下请求取自该漏洞绑定的流量证据/)).toBeVisible();
+  await expect(page.getByText(/以下请求按证据绑定记录生成/)).toBeVisible();
   await expect(page.getByText(/GET \/api\/records\/42 HTTP\/1\.1\s+Host: app\.example/)).toBeVisible();
   await expect(page.getByText(/TARGET_URL = "http:\/\/app\.example\/api\/records\/42"/)).toBeVisible();
   await expect(page.getByText(/src\/server\/records\.ts:42/)).toBeVisible();
@@ -425,7 +425,7 @@ test("finding detail previews and copies the same developer report", async ({ co
   expect(copied).toContain("触发位置：记录中心 → 我的记录，日常操作是打开记录列表。");
   expect(copied).toContain(officialVectors[0].vector);
   expect(copied).toContain("预期只显示当前账号的记录。测试记录显示，列表里出现了其他账号的记录。");
-  expect(copied).toContain("以下请求取自该漏洞绑定的流量证据");
+  expect(copied).toContain("以下请求按证据绑定记录生成");
   expect(copied).toContain("GET /api/records/42 HTTP/1.1");
   expect(copied).toContain("Host: app.example");
   expect(copied).toContain('TARGET_URL = "http://app.example/api/records/42"');

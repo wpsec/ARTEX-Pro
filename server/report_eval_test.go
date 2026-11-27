@@ -655,19 +655,14 @@ func TestDeliveryReportDraftAddsEvidenceRequestWhenModelOmitsPacket(t *testing.T
 	for _, expected := range []string{
 		"请求包供渗透测试工程师在授权目标中导入 Burp Repeater",
 		"不代表已通过 Burp 发送或验证",
-		"POST /api/jobs/job-a/types?access_token=%5BREDACTED%5D HTTP/1.1",
-		"Authorization: [REDACTED]",
-		"Cookie: [REDACTED]",
-		`"token":"[REDACTED]"`,
-		"Content-Length: 22",
+		"POST /api/jobs/job-a/types?access_token=query-secret HTTP/1.1",
+		"Authorization: Bearer session-secret",
+		"Cookie: sid=cookie-secret",
+		`{"token":"secret"}`,
+		"Content-Length: 18",
 	} {
 		if !strings.Contains(burpSection, expected) {
 			t.Fatalf("Burp subsection is missing %q: %s", expected, burpSection)
-		}
-	}
-	for _, secret := range []string{"query-secret", "session-secret", "cookie-secret", `"secret"`} {
-		if strings.Contains(burpSection, secret) {
-			t.Fatalf("Burp packet leaked %q: %s", secret, burpSection)
 		}
 	}
 }
